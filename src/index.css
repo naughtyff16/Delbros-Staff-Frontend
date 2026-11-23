@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@import "./lib/ui/theme.css";
+
+/* Scan the shared UI components for class names. */
+@source "./lib/ui";
+
+/* Print only the open document. PrintPreview mounts a print copy (.print-root) directly under <body>, in normal flow,
+   so long documents break across pages cleanly (table headers repeat, rows never overlap). */
+.print-root { display: none; }
+@media print {
+  body:has(> .print-root) > :not(.print-root) { display: none !important; }
+  body:has(> .print-root) { overflow: visible !important; }
+  .print-root { display: block; background: #fff; color: #000; font-size: 12px; line-height: 1.375; }
+  .print-root thead { display: table-header-group; }
+  .print-root tfoot { display: table-row-group; }
+  .print-root tr { break-inside: avoid; }
+  @page { size: letter; margin: 12mm; }
+}

@@ -1,0 +1,573 @@
+[
+  {
+    "name": "01-login",
+    "path": "/login",
+    "height": 1000,
+    "notes": [],
+    "errors": [],
+    "head": "Change log Delbros Leasing Delbros Group Chassis leasing, one system of record. Onboarding, gate operations, rescue, repair, billing, collection and compliance — for Head Office and all 10 branche"
+  },
+  {
+    "name": "02-dashboard",
+    "path": "/dashboard",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "03-approvals",
+    "path": "/approvals",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "04-ewa-new",
+    "path": "/gate/ewa",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "05-ewa-list",
+    "path": "/gate/ewa",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "06-gate-out",
+    "path": "/gate/out",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "07-gate-in",
+    "path": "/gate/in",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "08-eir",
+    "path": "/gate/eir",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "09-late-list",
+    "path": "/gate/late",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "10-late-new",
+    "path": "/gate/late",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "11-alloc-board",
+    "path": "/allocation",
+    "height": 2301,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "12-alloc-pipeline",
+    "path": "/allocation",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "13-unit-request-new",
+    "path": "/allocation",
+    "height": 2020,
+    "notes": [
+      "ok",
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "14-dcir",
+    "path": "/allocation/dcir",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "15-parkfix-in",
+    "path": "/allocation/park-fix",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "16-parkfix",
+    "path": "/allocation/park-fix",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "17-rescue-new",
+    "path": "/rescue",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "18-rescue-list",
+    "path": "/rescue",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "19-rescue-dashboard",
+    "path": "/rescue/dashboard",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "20-jo-new",
+    "path": "/repair/new",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "21-jo-list",
+    "path": "/repair",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "22-labor-summary",
+    "path": "/repair/reports",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "23-capacity",
+    "path": "/repair/reports",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "24-efficiency",
+    "path": "/repair/reports",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "25-client-new",
+    "path": "/clients/new",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "26-clients",
+    "path": "/clients",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "27-accred-submit",
+    "path": "/clients/accreditation",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "28-accred-queue",
+    "path": "/clients/accreditation",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "29-contract-new",
+    "path": "/contracts/new",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "30-contracts",
+    "path": "/contracts",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "31-cashbond-new",
+    "path": "/cash-bonds",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "32-cashbonds",
+    "path": "/cash-bonds",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "33-sales",
+    "path": "/sales",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "34-sales-log",
+    "path": "/sales",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "35-billing-run",
+    "path": "/billing/run",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "36-invoices",
+    "path": "/billing/invoices",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "37-memo-new",
+    "path": "/billing/memos",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "38-memos",
+    "path": "/billing/memos",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "39-ewallet-new",
+    "path": "/ewallet",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "40-ewallets",
+    "path": "/ewallet",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "41-client-status",
+    "path": "/credit/status",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "42-aging",
+    "path": "/credit/aging",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "43-chassis-new",
+    "path": "/chassis",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "44-chassis",
+    "path": "/chassis",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "45-asset-new",
+    "path": "/assets",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "46-assets",
+    "path": "/assets",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "47-inventory",
+    "path": "/inventory",
+    "height": 2812,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "48-stock-new",
+    "path": "/inventory/transactions",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "49-stock-ledger",
+    "path": "/inventory/transactions",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "50-pr-new",
+    "path": "/procurement",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "51-procurement",
+    "path": "/procurement",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "52-pcv-new",
+    "path": "/procurement",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "53-registration",
+    "path": "/regulatory",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "54-registration-new",
+    "path": "/regulatory",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "55-compliance",
+    "path": "/regulatory/compliance",
+    "height": 3200,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "56-rpt-registered",
+    "path": "/reports/view/DBL-RPT-013-02",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "57-rpt-unregistered",
+    "path": "/reports/view/DBL-RPT-013-03",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "58-executive",
+    "path": "/reports/executive",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "59-report-library",
+    "path": "/reports",
+    "height": 3087,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "60-user-new",
+    "path": "/admin/users",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "61-users",
+    "path": "/admin/users",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "62-notification-rules",
+    "path": "/admin/notifications",
+    "height": 2131,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "63-settings",
+    "path": "/admin/settings",
+    "height": 3200,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "64-branch-new",
+    "path": "/admin/master",
+    "height": 2020,
+    "notes": [
+      "ok"
+    ],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "65-master-branches",
+    "path": "/admin/master",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  },
+  {
+    "name": "66-audit",
+    "path": "/admin/audit",
+    "height": 2020,
+    "notes": [],
+    "errors": [],
+    "head": "Delbros Leasing Leasing management OVERVIEW Dashboard OPERATIONS EWA Gate Out Gate In EIR Late Encoding Allocation DCIR Park & Fix RESCUE & REPAIR Rescue Requests Rescue Dashboard Job Orders La"
+  }
+]
