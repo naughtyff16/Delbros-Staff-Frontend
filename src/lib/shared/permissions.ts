@@ -79,7 +79,7 @@ export const ROLE_TEMPLATES: Record<RoleCode, { label: string; grants: Grants }>
   },
   DYM: {
     label: 'Deputy Yard Manager',
-    grants: { ...grant(OPS_VIEW, VIEW_EXPORT), ...grant(['gate.ewa', 'gate.out', 'gate.in'], WRITE), 'gate.late_encoding': ['view', 'approve'], 'repair.jo': ['view', 'edit', 'check', 'approve'], 'chassis.status': ['view', 'approve'], 'repair.labor_reports': VIEW_EXPORT, 'alloc.parkfix': WRITE, 'inv.balance': VIEW, 'alloc.board': [...VIEW_EXPORT, 'add', 'edit'] },
+    grants: { ...grant(OPS_VIEW, VIEW_EXPORT), ...grant(['gate.ewa', 'gate.out', 'gate.in'], WRITE), 'gate.late_encoding': ['view', 'approve'], 'repair.jo': ['view', 'edit', 'check', 'approve'], 'chassis.status': ['view', 'approve'], 'repair.labor_reports': VIEW_EXPORT, 'alloc.parkfix': [...WRITE, 'check'], 'inv.balance': VIEW, 'alloc.board': [...VIEW_EXPORT, 'add', 'edit'] }, // V1.4 row 21: 'check' = DYM sign-off on Park & Fix receipts
   },
   REGIONAL_MANAGER: { label: 'Regional Manager', grants: { ...grant(OPS_VIEW, VIEW_EXPORT), 'gate.ewa': ['view', 'approve'], 'gate.force_inbound': ['view', 'approve'], 'rpt.executive': VIEW, 'rpt.library': VIEW_EXPORT } },
   OPS_MANAGER: { label: 'Operations Manager', grants: { ...grant(OPS_VIEW, VIEW_EXPORT), 'gate.ewa': ['view', 'approve'], 'gate.force_inbound': ['view', 'approve'], 'chassis.status': ['view', 'approve'], 'repair.labor_reports': VIEW_EXPORT, 'rescue.dispatch': WRITE, 'rpt.executive': VIEW, 'rpt.library': VIEW_EXPORT, 'alloc.parkfix': [...WRITE, 'approve'], 'alloc.board': [...VIEW_EXPORT, 'add', 'edit'] } },
@@ -97,11 +97,14 @@ export const ROLE_TEMPLATES: Record<RoleCode, { label: string; grants: Grants }>
   DEPT_HEAD: { label: 'Department Head', grants: { 'prc.pr': ['view', 'add', 'approve'], 'prc.payment': ['view', 'approve'] } },
   REGULATORY: { label: 'Regulatory Specialist', grants: { 'reg.registration': ALL, 'reg.compliance': VIEW_EXPORT, 'chassis.chassis': VIEW } },
   VP: { label: 'VP', grants: { 'clients.accreditation': ['view', 'approve'], 'clients.client': VIEW, 'gate.force_inbound': ['view', 'approve'], 'rpt.executive': VIEW } },
-  CEO: { label: 'CEO', grants: { 'prc.po': ['view', 'approve'], 'rpt.executive': VIEW, 'rpt.library': VIEW_EXPORT } },
-  CHRO: { label: 'CHRO', grants: { 'prc.po': ['view', 'approve'], 'rpt.executive': VIEW } },
+  // Staff UI changes V1.4 (row 10): CEO and CHRO are the BR-09 final approvers above the PO threshold — read-only PR access so each
+  // can open the request details from My approvals (no PR add / edit / approve).
+  CEO: { label: 'CEO', grants: { 'prc.pr': VIEW, 'prc.po': ['view', 'approve'], 'rpt.executive': VIEW, 'rpt.library': VIEW_EXPORT } },
+  CHRO: { label: 'CHRO', grants: { 'prc.pr': VIEW, 'prc.po': ['view', 'approve'], 'rpt.executive': VIEW } },
   PRESIDENT: { label: 'President', grants: { 'gate.force_inbound': ['view', 'approve'], 'rpt.executive': VIEW, 'rpt.library': VIEW_EXPORT } },
   EXECUTIVE: { label: 'Executive / Department Head (read)', grants: { 'rpt.executive': VIEW, 'rpt.library': VIEW_EXPORT, ...grant(OPS_VIEW, VIEW) } },
-  WAREHOUSE: { label: 'Warehouse / Stockroom', grants: { 'inv.txn': WRITE, 'inv.balance': VIEW_EXPORT, 'prc.rr': WRITE, 'repair.bom': VIEW } },
+  // V1.4 row 50: tool custody — the Stockroom Custodian issues tools and records their return ('check' on non-chassis equipment; no asset edits). Role pending confirmation.
+  WAREHOUSE: { label: 'Warehouse / Stockroom', grants: { 'inv.txn': WRITE, 'inv.balance': VIEW_EXPORT, 'prc.rr': WRITE, 'repair.bom': VIEW, 'chassis.asset': ['view', 'check'] } },
   // Review 1.1 (FRS role table): read-only Auditor (audit trail, inventory audit evidence, financial records) and Repairman / Technician.
   AUDITOR: { label: 'Auditor (read-only)', grants: { ...grant(['admin.audit', 'inv.balance', 'inv.txn', 'fin.invoice', 'fin.receipt', 'fin.memo', 'ewl.ledger', 'cnc.aging', 'repair.jo', 'prc.po', 'prc.rr', 'prc.payment', 'rpt.library'], VIEW_EXPORT), 'clients.client': VIEW, 'clients.contract': VIEW, 'chassis.chassis': VIEW, 'reg.registration': VIEW, 'reg.compliance': VIEW } },
   TECHNICIAN: { label: 'Repairman / Technician', grants: { 'repair.jo': VIEW, 'repair.bom': VIEW, 'chassis.chassis': VIEW, 'rescue.request': VIEW } },
@@ -112,6 +115,23 @@ export const ROLE_TEMPLATES: Record<RoleCode, { label: string; grants: Grants }>
   CLIENT: { label: 'Client (portal)', grants: {} },
   VENDOR: { label: 'Vendor (portal)', grants: {} },
 };
+
+/**
+ * Staff UI changes V1.4 (rows 2–7): role labels that are not in the FRS role list, kept in one register so the sign-in picker and
+ * Users & roles show the same text. Every entry stays "Pending Delbros confirmation" until the approved name, scope and permissions
+ * are recorded — the permission sets in ROLE_TEMPLATES for these roles are proposed defaults only.
+ */
+export interface PendingRole { role: RoleCode; label: string; demoUser: string; frsMapping: string; scope: string; responsibilities: string; status: 'Pending Delbros confirmation' }
+export const PENDING_ROLES: PendingRole[] = [
+  { role: 'BRANCH_HEAD', label: 'Branch Head', demoUser: 'BH.MNL', frsMapping: 'Not in the FRS role list. Proposed: branch-level approver above the Branch Generalist and DYM. (V1.4 writes the code as BK.MNL; the live code is BH.MNL.)', scope: 'One branch (Manila Yard in the demo)', responsibilities: 'Branch operations oversight; approves EWA, late encoding and job orders for the branch', status: 'Pending Delbros confirmation' },
+  { role: 'GATE_CLERK', label: 'Gate Clerk', demoUser: 'GATE.MNL', frsMapping: 'Not in the FRS role list. Proposed: gate encoding split out of the Branch Generalist role.', scope: 'One branch (Manila Yard in the demo)', responsibilities: 'Gate Out / Gate In encoding and release; records late encoding (no approvals)', status: 'Pending Delbros confirmation' },
+  { role: 'DISPATCHER', label: 'Rescue Dispatcher', demoUser: 'DISP.MNL', frsMapping: 'The FRS names a Rescue Coordinator (held by OPSMGR). Proposed: the Dispatcher sends the crew; the Rescue Coordinator keeps rescue approvals. Confirm whether they are one role.', scope: 'One branch (Manila Yard in the demo)', responsibilities: 'Logs and dispatches rescues; records crew, vehicle, driver and ETA (no approvals)', status: 'Pending Delbros confirmation' },
+  { role: 'WAREHOUSE', label: 'Stockroom Custodian', demoUser: 'WH.MNL', frsMapping: 'Not in the FRS role list. Proposed: stockroom role under APS / MMG.', scope: 'One warehouse (WH-MNL in the demo)', responsibilities: 'Stock transactions and counts, receiving against issued POs, tool custody (no PR approvals)', status: 'Pending Delbros confirmation' },
+  { role: 'VP', label: 'Vice President', demoUser: 'VP', frsMapping: 'Not in the FRS role list. Proposed: accreditation final signatory (CLT-003) and force-inbound approver.', scope: 'All branches', responsibilities: 'VP sign-off on accreditation (sets eligibility flags and CWS branches); force-inbound approval', status: 'Pending Delbros confirmation' },
+];
+/** Row 2: the FRS Rescue Coordinator vs the proposed Rescue Dispatcher. */
+export const RESCUE_ROLE_MAPPING = 'The FRS role "Rescue Coordinator" is held by OPSMGR (Operations Manager); DISP.MNL carries the separately named, proposed "Rescue Dispatcher". Proposed split: the Dispatcher logs and dispatches, the Coordinator approves dispatch and costs. Delbros to confirm whether they are the same role, then align the role template, picker label, permissions and dispatch ownership.';
+export const pendingRole = (r: RoleCode) => PENDING_ROLES.find((p) => p.role === r);
 
 export function resolveGrants(roles: RoleCode[], overrides?: Grants): Grants {
   const out: Record<string, Set<Action>> = {};

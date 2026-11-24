@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Archive, BadgeCheck, ChevronRight, CircleCheck, Plus, QrCode, RefreshCw, Trash2, Wrench } from 'lucide-react';
 import { api } from '../../lib/api-client';
-import { CHASSIS_STATUSES, REG_STATES, todayManila, formatDate, formatDateTime, formatPhp, type Asset, type Chassis, type ChassisStatus } from '../../lib/shared';
+import { CHASSIS_STATUSES, REG_STATES, todayManila, formatDate, formatDateTime, formatPhp, type Asset, type Chassis, type ToolIssue, type ChassisStatus } from '../../lib/shared';
 import {
   ApprovalTimeline, Badge, Banner, Button, Card, CardHeader, ConfirmDialog, DataTable, Drawer, Field, FormGrid, Input, KeyValueGrid, Modal, PageHeader, Segmented, Select, Stack, StatusBadge, Tabs, Textarea, cn, type ColumnDef,
 } from '../../lib/ui';
@@ -352,6 +352,17 @@ function AssetDetail({ id, onClose, onEdit }: { id: string; onClose: () => void;
   const closed = !!a && ['Retired', 'Disposed'].includes(a.status);
   const pending = a?.disposal?.status === 'Pending Approval';
   const editable = can('chassis.asset', 'edit');
+  // V1.4 row 50: issue & return of tools (custodian 'check' or editors).
+  const isTool = !!a && ['Depot Tool', 'Stockroom Tool'].includes(a.category);
+  const canIssue = can('chassis.asset', 'edit') || can('chassis.asset', 'check');
+  const toolOut = (a?.issues ?? []).reduce((s, i) => s + i.qty - i.returns.reduce((r, x) => r + x.qty, 0), 0);
+  const [iss, setIss] = useState<{ issuedTo: string; qty: number; purpose: string; conditionOut: string; dueBack: string } | null>(null);
+  const [ret, setRet] = useState<{ issueId: string; max: number; qty: number; condition: string; notes: string } | null>(null);
+  const issue = useAction(() => api.chassis.issueTool(id, { ...iss!, dueBack: iss!.dueBack || undefined }), { success: 'Tool issued — recorded on the issue log', onSuccess: () => setIss(null) });
+  const giveBack = useAction(() => api.chassis.returnTool(id, ret!.issueId, ret!), { success: 'Return recorded', onSuccess: () => setRet(null) });
+  const { ref: refData } = useRefLookups();
+  const issueTo = [...(refData?.users ?? []).filter((u) => !u.roles.some((r) => r === 'CLIENT' || r === 'VENDOR')).map((u) => ({ value: u.userId, label: `${u.name} (${u.userId})` })),
+    ...['Repair & Maintenance', 'Yard Operations', 'Gate'].map((d) => ({ value: `Dept: ${d}`, label: `Department — ${d}` }))];
   return (
     <Drawer open onClose={onClose} title={a ? <span className="flex items-center gap-2"><span className="font-mono">{a.assetId}</span><StatusBadge domain="asset" value={a.status} />{a.statusSince && <span className="text-xs font-normal text-muted">since {formatDate(a.statusSince)}</span>}</span> : 'Asset'} width="max-w-3xl"
       footer={a && editable && <>
@@ -367,7 +378,25 @@ function AssetDetail({ id, onClose, onEdit }: { id: string; onClose: () => void;
           {pending && <Banner tone="warning" title={`${a.disposal!.action} request pending APS / MMG Manager approval`}>{a.disposal!.reason} · requested {formatDateTime(a.disposal!.requestedAt)}. Approve or reject it in the Inbox.</Banner>}
           {a.status === 'Retired' && !pending && <Banner tone="info">Retired — out of service but still on the books. Dispose (sell, scrap or write off) through a separate approved request.</Banner>}
           {a.status === 'Disposed' && <Banner tone="info">Disposed — removed from the books after approval. The record is kept for the audit trail.</Banner>}
-          <Tabs value={tab} onChange={setTab} items={[{ id: 'details', label: 'Details' }, { id: 'mnt', label: 'Maintenance history', count: a.maintenanceLog?.length ?? 0 }, { id: 'audit', label: 'Audit trail', count: data.data!.audit.length }]} />
+          <Tabs value={tab} onChange={setTab} items={[{ id: 'details', label: 'Details' }, ...(isTool ? [{ id: 'issue', label: 'Issue & return', count: a.issues?.length ?? 0 }] : []), { id: 'mnt', label: 'Maintenance history', count: a.maintenanceLog?.length ?? 0 }, { id: 'audit', label: 'Audit trail', count: data.data!.audit.length }]} />
+          {/* V1.4 row 50: tools issued to individual users / departments, partial returns with condition, outstanding quantity reconciled to the stock. */}
+          {tab === 'issue' && <Stack>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-alt px-3 py-2 text-sm">
+              <span><b className="tabular">{a.qty ?? 1}</b> {a.uom ?? 'unit'} in total</span><span>·</span><span><b className="tabular text-warning">{toolOut}</b> issued out</span><span>·</span><span><b className="tabular text-success">{(a.qty ?? 1) - toolOut}</b> on hand</span>
+              <span className="text-xs text-muted">Custodian: {a.assignedTo?.startsWith('Dept: ') ? a.assignedTo.slice(6) : userName(a.assignedTo)}</span>
+              {canIssue && !closed && (a.qty ?? 1) - toolOut > 0 && <Button size="sm" className="ml-auto" onClick={() => setIss({ issuedTo: '', qty: 1, purpose: '', conditionOut: a.condition ?? 'Good', dueBack: '' })}>Issue tool</Button>}
+            </div>
+            <DataTable data={a.issues ?? []} searchable={false} emptyTitle="Not issued yet" exportName={`tool-issues-${a.assetId}`} columns={[
+              { accessorKey: 'issuedAt', header: 'Issued', cell: (x) => <span className="whitespace-nowrap">{formatDateTime(x.getValue<string>())}<span className="block font-mono text-xs text-muted">{x.row.original.id}</span></span> },
+              { accessorKey: 'issuedTo', header: 'Issued to', cell: (x) => { const v = x.getValue<string>(); return <span>{v.startsWith('Dept: ') ? v.slice(6) : userName(v)}{x.row.original.purpose && <span className="block text-xs text-muted">{x.row.original.purpose}</span>}</span>; } },
+              { accessorKey: 'qty', header: 'Qty', meta: { align: 'right' } },
+              { id: 'ret', header: 'Returns (qty · date · condition)', cell: (x) => x.row.original.returns.length ? <ul className="text-xs">{x.row.original.returns.map((r, k) => <li key={k}>{r.qty} · {formatDate(r.at)} · {r.condition}{r.notes ? ` — ${r.notes}` : ''}</li>)}</ul> : <span className="text-xs text-muted">None yet</span> },
+              { id: 'out', header: 'Outstanding', meta: { align: 'right' }, cell: (x) => { const o = x.row.original.qty - x.row.original.returns.reduce((s, r) => s + r.qty, 0); return <span className={cn('font-medium tabular', o > 0 ? 'text-warning' : 'text-success')}>{o}{x.row.original.dueBack && o > 0 ? <span className="block text-xs font-normal text-muted">due {formatDate(x.row.original.dueBack)}</span> : null}</span>; } },
+              { id: 'cond', header: 'Condition out', cell: (x) => x.row.original.conditionOut },
+              { id: 'a', header: '', cell: (x) => { const o = x.row.original.qty - x.row.original.returns.reduce((s, r) => s + r.qty, 0); return canIssue && o > 0 ? <Button size="sm" variant="secondary" onClick={() => setRet({ issueId: x.row.original.id, max: o, qty: o, condition: 'Good', notes: '' })}>Return</Button> : null; } },
+            ] as ColumnDef<ToolIssue>[]} />
+            <p className="text-xs text-muted">On hand = total quantity − outstanding issues, so the tool count always reconciles to the stockroom. Partial returns and several recipients are allowed (proposed — to confirm with Delbros).</p>
+          </Stack>}
           {tab === 'details' && <>
             <KeyValueGrid cols={3} items={[
               { label: 'Description', value: a.description }, { label: 'Category', value: a.category }, { label: 'Branch', value: branchName(a.branchCode) }, { label: 'Location', value: a.location },
@@ -396,6 +425,25 @@ function AssetDetail({ id, onClose, onEdit }: { id: string; onClose: () => void;
       )}
       <ConfirmDialog open={!!to} onClose={() => setTo('')} title={`Change status to ${to}?`} message="The change and your reason are recorded in the audit trail." requireReason confirmLabel="Change status" loading={change.isPending} onConfirm={(r) => change.mutate(r)} />
       <ConfirmDialog open={!!disp} onClose={() => setDisp(null)} tone={disp === 'Dispose' ? 'danger' : 'primary'} title={`${disp} ${id}?`} message={disp === 'Retire' ? 'Retiring takes the asset out of service. It needs APS / MMG Manager approval before the status changes.' : 'Disposal removes the asset from the books (sale, scrap or write-off). It needs APS / MMG Manager approval before the status changes.'} requireReason confirmLabel={`Request ${disp?.toLowerCase()}`} loading={dispose.isPending} onConfirm={(r) => dispose.mutate(r)} />
+      <Modal open={!!iss} onClose={() => setIss(null)} title={`Issue ${a?.description ?? id}`} description={`${(a?.qty ?? 1) - toolOut} ${a?.uom ?? 'unit'} on hand`}
+        footer={<><Button variant="secondary" onClick={() => setIss(null)}>Cancel</Button><Button loading={issue.isPending} disabled={!iss?.issuedTo || !(iss.qty >= 1)} onClick={() => issue.mutate(undefined)}>Issue</Button></>}>
+        {iss && <FormGrid>
+          <Select label="Issued to" required value={iss.issuedTo} error={fieldError(issue.error, 'issuedTo')} onChange={(e) => setIss({ ...iss, issuedTo: e.target.value })} placeholder="Select a user or department" options={issueTo} />
+          <Input label="Quantity" type="number" required min={1} max={(a?.qty ?? 1) - toolOut} value={iss.qty} error={fieldError(issue.error, 'qty')} onChange={(e) => setIss({ ...iss, qty: Number(e.target.value) })} />
+          <Select label="Condition out" required value={iss.conditionOut} onChange={(e) => setIss({ ...iss, conditionOut: e.target.value })} options={['Good', 'Fair', 'Poor'].map((x) => ({ value: x, label: x }))} />
+          <Input label="Due back" type="date" min={todayManila()} value={iss.dueBack} onChange={(e) => setIss({ ...iss, dueBack: e.target.value })} hint="Optional" />
+          <Input label="Purpose / job" value={iss.purpose} onChange={(e) => setIss({ ...iss, purpose: e.target.value })} placeholder="e.g. JO-NVL-000498" wrapperClassName="md:col-span-2" />
+          {issue.error && !fieldError(issue.error, 'qty') && <Banner tone="danger" className="md:col-span-2">{errMessage(issue.error)}</Banner>}
+        </FormGrid>}
+      </Modal>
+      <Modal open={!!ret} onClose={() => setRet(null)} title="Record return" description={ret ? `${ret.max} outstanding on ${ret.issueId}` : undefined}
+        footer={<><Button variant="secondary" onClick={() => setRet(null)}>Cancel</Button><Button loading={giveBack.isPending} disabled={!ret || !(ret.qty >= 1) || ret.qty > ret.max} onClick={() => giveBack.mutate(undefined)}>Record return</Button></>}>
+        {ret && <FormGrid>
+          <Input label="Quantity returned" type="number" required min={1} max={ret.max} value={ret.qty} error={fieldError(giveBack.error, 'qty')} onChange={(e) => setRet({ ...ret, qty: Number(e.target.value) })} />
+          <Select label="Condition on return" required value={ret.condition} onChange={(e) => setRet({ ...ret, condition: e.target.value })} options={['Good', 'Fair', 'Poor', 'Damaged', 'Lost'].map((x) => ({ value: x, label: x }))} />
+          <Input label="Notes" value={ret.notes} onChange={(e) => setRet({ ...ret, notes: e.target.value })} placeholder="e.g. one socket missing" wrapperClassName="md:col-span-2" />
+        </FormGrid>}
+      </Modal>
       <Modal open={mnt} onClose={() => setMnt(false)} title={`Log maintenance — ${id}`} footer={<><Button variant="secondary" onClick={() => setMnt(false)}>Cancel</Button><Button loading={log.isPending} disabled={!m.date || !m.notes.trim()} onClick={() => log.mutate(undefined)}>Save</Button></>}>
         <Stack>
           <FormGrid>

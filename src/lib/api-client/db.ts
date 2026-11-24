@@ -27,7 +27,7 @@ export interface Db {
 }
 
 const KEY = 'delbros.mockdb.v4';
-export const DB_VERSION = 15; // 2026-11-16: staff review 1.2 data fixes (v14 = staff review 1.1); reloads the mock DB once
+export const DB_VERSION = 16; // 2026-11-24: Staff UI changes V1.4 data (v15 = staff review 1.2); reloads the mock DB once
 
 function load(): Db {
   try {

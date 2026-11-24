@@ -205,6 +205,13 @@ export function JobOrderDetailPage() {
   const [labor, setLabor] = useState({ worker: '', hours: 1, rate: 95, shift: 'Morning' as LaborShift });
   const [holdOpen, setHoldOpen] = useState(false);
   const tr = useAction((a: { action: 'approve' | 'start' | 'hold' | 'resume' | 'close-rm'; reason?: string }) => api.repair.transition(no, a.action, a.reason), { success: (j) => `Job order is now ${j.status}`, onSuccess: () => setHoldOpen(false) });
+  // V1.4 rows 32–33: per-system closure and Close by R&M with after-repair photos (rules are proposed settings).
+  const { setting } = useRefLookups();
+  const perSystem = setting('rm.closure_rule') !== 'per_jo', photoRequired = String(setting('rm.after_photo_required') ?? 'true') !== 'false';
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [after, setAfter] = useState<string[]>([]);
+  const closeSys = useAction((s: RepairCategory) => api.repair.closeSystem(no, s), { success: (j) => `Repair system closed — ${j.systemsClosed?.length ?? 0} of ${j.categories.length} closed` });
+  const closeRm = useAction(() => api.repair.closeByRm(no, after), { success: 'Closed by R&M — after-repair photos saved; the unit now waits for the quality sign-off (TQS)', onSuccess: () => { setCloseOpen(false); setAfter([]); } });
   // Review 1.2: issuing stockroom defaults to the JO branch's stockroom, else the user's, else the first one (Navotas has no stockroom of its own).
   const whs = data.data?.warehouses ?? [];
   const wh = whPick || whs.find((w) => w.branchCode === data.data?.jo.branchCode)?.code || (whs.some((w) => w.code === user?.warehouseCode) ? user?.warehouseCode : undefined) || whs[0]?.code || 'WH-MNL';
@@ -228,12 +235,27 @@ export function JobOrderDetailPage() {
         actions={<>
           {jo.status === 'Draft' && can('repair.jo', 'approve') && <Button icon={<ShieldCheck className="size-4" />} loading={tr.isPending} onClick={() => tr.mutate({ action: 'approve' })} title="Approved by the Branch Generalist lead">Approve job order</Button>}
           {jo.status === 'Confirmed' && <Button icon={<Play className="size-4" />} onClick={() => tr.mutate({ action: 'start' })}>Start work</Button>}
-          {jo.status === 'Ongoing' && <><Button variant="secondary" icon={<Pause className="size-4" />} onClick={() => setHoldOpen(true)}>Put on hold</Button><Button variant="success" icon={<CircleCheck className="size-4" />} onClick={() => tr.mutate({ action: 'close-rm' })}>Close by R&amp;M</Button></>}
+          {jo.status === 'Ongoing' && <><Button variant="secondary" icon={<Pause className="size-4" />} onClick={() => setHoldOpen(true)}>Put on hold</Button><Button variant="success" icon={<CircleCheck className="size-4" />} onClick={() => { setAfter([]); setCloseOpen(true); }}>Close by R&amp;M…</Button></>}
           {jo.status === 'On Hold' && <Button icon={<Play className="size-4" />} onClick={() => tr.mutate({ action: 'resume' })}>Resume</Button>}
         </>} />
       <ConfirmDialog open={holdOpen} onClose={() => setHoldOpen(false)} requireReason title={`Put ${jo.joNo} on hold?`} confirmLabel="Put on hold" loading={tr.isPending}
         message="Give the reason (e.g. waiting for parts, waiting for client approval). It shows on the job order and in its status history." onConfirm={(reason) => tr.mutate({ action: 'hold', reason })} />
       {jo.status === 'On Hold' && <Banner tone="warning" className="mb-4" title="On hold">{jo.holdReason ?? 'Reason not recorded.'}</Banner>}
+      {/* V1.4 rows 32–33: Close by R&M — every repair system closed (per-system rule) and the after-repair photos. */}
+      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title={`Close ${jo.joNo} by R&M`} description="Repairs complete — the unit then waits for the quality sign-off (TQS) before it becomes Available."
+        footer={<><Button variant="secondary" onClick={() => setCloseOpen(false)}>Cancel</Button><Button variant="success" loading={closeRm.isPending} disabled={(perSystem && jo.categories.some((s) => !jo.systemsClosed?.some((x) => x.system === s))) || (photoRequired && !after.length)} onClick={() => closeRm.mutate(undefined)}>Close by R&amp;M</Button></>}>
+        <Stack>
+          {closeRm.error && <Banner tone="danger">{errMessage(closeRm.error)}</Banner>}
+          <div><p className="mb-1 text-[13px] font-medium text-ink-2">Repair systems</p>
+            <ul className="space-y-1 text-sm">{jo.categories.map((s) => { const c = jo.systemsClosed?.find((x) => x.system === s); return <li key={s} className="flex items-center gap-2">{c ? <Check className="size-4 text-success" /> : <X className="size-4 text-danger" />}<span className="font-medium">{s}</span><span className="text-xs text-muted">{c ? `closed ${formatDateTime(c.at)} · ${userName(c.by)}` : perSystem ? 'still open — close it on the job order first' : 'closed with the job order'}</span></li>; })}</ul>
+            <p className="mt-1 text-xs text-muted">Rule: {perSystem ? 'each repair system is closed separately before the job order (proposed)' : 'one Close by R&M closes every system'} — pending Delbros confirmation (Admin → Settings → Repair).</p></div>
+          <div className="flex flex-col gap-1.5"><span className="text-[13px] font-medium text-ink-2">After-repair photos{photoRequired && <span className="text-danger"> *</span>}</span>
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-2 text-sm text-muted hover:bg-surface-alt"><Camera className="size-4" />Add after-repair photos (camera or file)
+              <input type="file" accept="image/*" capture="environment" multiple className="sr-only" onChange={(e) => { setAfter([...after, ...Array.from(e.target.files ?? []).map((f) => f.name)]); e.target.value = ''; }} /></label>
+            {after.length > 0 && <div className="flex flex-wrap gap-1.5">{after.map((n, i) => <Badge key={i} tone="success" dot={false}>After · {n}<button type="button" aria-label={`Remove ${n}`} className="ml-1" onClick={() => setAfter(after.filter((_, k) => k !== i))}><X className="size-3" /></button></Badge>)}</div>}
+            <p className="text-xs text-muted">Kept on the completed job order beside the before (damage) photos. {photoRequired ? 'Required by the proposed rule.' : 'Optional.'}</p></div>
+        </Stack>
+      </Modal>
       <ol className="mb-5 flex flex-wrap gap-2">{JO_FLOW.map((s, i) => <li key={s} className={cn('rounded-full border px-3 py-1 text-xs font-medium', i < idx ? 'border-success-line bg-success-bg text-success' : i === idx ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-line text-muted')}>{s}</li>)}</ol>
       {jo.status === 'Approved' && <Banner tone="info" className="mb-4">Waiting for DYM confirmation in My Approvals.</Banner>}
       {jo.status === 'Closed by R&M' && <Banner tone="success" className="mb-4">Repairs verified complete. The JO closes automatically as “Closed by EIR Out” when the chassis next leaves the gate and is billed. Additional work needs a new JO.</Banner>}
@@ -251,11 +273,25 @@ export function JobOrderDetailPage() {
             { label: 'Workers', value: jo.workers.join(', ') || '—' },
             { label: 'Chargeable', value: jo.chargeable ? <span>Yes{chargeClient ? ` — ${chargeClient.clientName} (${chargeClient.clientCode})` : ''}{debitMemos.length ? <span className="block text-xs">{debitMemos.map((m) => <Link key={m.memoNo} className="mr-2 font-mono text-brand-600 hover:underline" to={`/billing/memos?memo=${m.memoNo}`}>{m.memoNo} ({m.status})</Link>)}</span> : <span className="block text-xs text-muted">Debit Memo (Repair cost) not raised yet</span>}</span> : 'No' },
             { label: 'Approved by', value: userName(jo.approvedBy) }, { label: 'Confirmed by', value: userName(jo.confirmedBy) },
-            { label: 'Photos / attachments', value: jo.photos?.length ? <span className="flex flex-wrap gap-1">{jo.photos.map((p) => <Badge key={p} tone="neutral" dot={false} icon={<Camera className="size-3" />}>{p}</Badge>)}</span> : 'None' },
+            // V1.4 row 33: before (damage) and after-repair photos, labelled.
+            { label: 'Photos — before', value: jo.photos?.length ? <span className="flex flex-wrap gap-1">{jo.photos.map((p) => <Badge key={p} tone="neutral" dot={false} icon={<Camera className="size-3" />}>Before · {p}</Badge>)}</span> : 'None' },
+            { label: 'Photos — after repair', value: jo.afterPhotos?.length ? <span className="flex flex-wrap gap-1">{jo.afterPhotos.map((p) => <Badge key={p} tone="success" dot={false} icon={<Camera className="size-3" />}>After · {p}</Badge>)}</span> : <span className={cn('text-sm', jo.status.startsWith('Closed') ? 'text-warning' : 'text-muted')}>{jo.status.startsWith('Closed') ? 'None (closed before after-repair photos were captured)' : 'Added at Close by R&M'}</span> },
             ...(jo.spotDriver ? [{ label: 'Spot driver', value: `${jo.spotDriver.name} · ${jo.spotDriver.license} · ${jo.spotDriver.truckPlate}` }] : [])]} />
           <div className="mt-4"><p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Notes / description</p><p className="rounded-lg bg-surface-alt p-3 text-sm">{jo.notes}</p></div>
           <div className="mt-4"><p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Status history</p>
             <ol className="space-y-1 text-sm">{history.map((h, i) => <li key={i} className="flex flex-wrap gap-x-2"><StatusBadge domain="jo" value={h.status} /><span className="text-ink-2">{h.at ? formatDateTime(h.at) : 'time not recorded'}</span>{h.by && <span className="text-muted">· {userName(h.by)}</span>}{h.note && <span className="text-muted">· {h.note}</span>}</li>)}</ol></div>
+        </Card>
+        <Stack>
+        {/* V1.4 row 32 (ALO-004): each repair system's closure. */}
+        <Card>
+          <CardHeader title="Repair systems" description={perSystem ? 'Close each system when its repair is done (proposed rule — pending confirmation).' : 'Closed together by Close by R&M (rule pending confirmation).'} />
+          <ul className="space-y-1.5 text-sm">{jo.categories.map((s) => { const c = jo.systemsClosed?.find((x) => x.system === s); return (
+            <li key={s} className="flex items-center justify-between gap-2"><span className="flex items-center gap-2">{c ? <Check className="size-4 text-success" /> : <Wrench className="size-4 text-muted" />}<span className="font-medium">{s}</span></span>
+              {c ? <span className="text-xs text-muted">Closed {formatDate(c.at)} · {userName(c.by)}</span>
+                : ['Ongoing', 'On Hold'].includes(jo.status) && can('repair.jo', 'edit') ? <Button size="sm" variant="secondary" loading={closeSys.isPending} onClick={() => closeSys.mutate(s)}>Close {s.toLowerCase()}</Button>
+                : <span className="text-xs text-muted">{jo.status.startsWith('Closed') ? 'Closed with the job order' : 'Open'}</span>}</li>); })}</ul>
+          {closeSys.error && <Banner className="mt-2" tone="danger">{errMessage(closeSys.error)}</Banner>}
+          <p className="mt-2 text-xs text-muted">The chassis stays unavailable until every required repair is closed and the quality sign-off (TQS) is done on the Allocation board.</p>
         </Card>
         <Card>
           <CardHeader title="Cost" />
@@ -263,6 +299,17 @@ export function JobOrderDetailPage() {
           <div className="mt-2 flex justify-between border-t border-line pt-2 font-semibold"><span>Total</span><MoneyText value={parts + laborCost} /></div>
           {workflow && <div className="mt-4 border-t border-line pt-4"><ApprovalTimeline workflow={workflow} userName={userName} /></div>}
         </Card>
+        {/* V1.4 row 34 (RM-002): the closure trail — Closed by R&M, the departure (gate pass / EIR) that closed it by EIR Out, final cost and the billed memo. */}
+        {jo.status.startsWith('Closed') && <Card>
+          <CardHeader title="Closure & billing trail" />
+          <KeyValueGrid cols={2} items={[
+            { label: 'Closed by R&M', value: jo.closedAt ? formatDateTime(jo.closedAt) : '—' },
+            { label: 'Closed by EIR Out (departure)', value: jo.eirOut ? <span><Link className="font-mono text-brand-600 hover:underline" to={`/gate/eir?q=${jo.eirOut.eirNo}`}>{jo.eirOut.eirNo}</Link> · <span className="font-mono">{jo.eirOut.gatePassNo}</span> · {formatDateTime(jo.eirOut.at)}</span> : jo.status === 'Closed by EIR Out' ? 'Departure not recorded (older record)' : 'Waits for the next Gate Out of the chassis' },
+            { label: 'Final cost (parts + labor)', value: formatPhp(parts + laborCost) },
+            { label: 'Billed memo', value: !jo.chargeable ? 'Not chargeable — Delbros cost' : debitMemos.length ? <span>{debitMemos.map((m) => <Link key={m.memoNo} className="mr-2 font-mono text-brand-600 hover:underline" to={`/billing/memos?memo=${m.memoNo}`}>{m.memoNo} · {formatPhp(m.amount)} ({m.status})</Link>)}</span> : <span className="text-warning">Chargeable — no Debit Memo yet</span> },
+          ]} />
+        </Card>}
+        </Stack>
       </div>
       <Tabs className="mb-4" value={tab} onChange={setTab} items={[{ id: 'bom', label: 'Bill of materials', count: jo.bom.length }, { id: 'labor', label: 'Labor', count: jo.labor.length }]} />
       {tab === 'bom' && (

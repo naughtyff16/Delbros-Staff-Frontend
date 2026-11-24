@@ -4,6 +4,22 @@ Temporary log of the correction and UI/UX work, newest first, so the team can fo
 The same entries open from the sticky “Change log” button (bottom-right) on both sign-in pages while `app-config.json` has `"showChangeLog": true`.
 Source of truth: `src/lib/shared/changelog.ts` — regenerate this file with `node scripts/changelog-md.mjs`.
 
+## 24-Nov-2026
+
+### Staff UI changes V1.4 — pending staff-portal rows (frontend only) `Fix`
+
+**Why:** Staff-Portal-Changes sheet (54 rows from the V1.4 document and live cross-check of 23-Nov-2026): complete the Not met / Partly / Not verified rows and make every Needs-confirmation decision visible as a proposed, switchable rule.
+
+- Roles: one register of the five roles not in the FRS list (picker badge, Users & roles table, Rescue Coordinator / Dispatcher note); AE cards state the portal-registration approval; CEO / CHRO read PR details; PR-000209 waits at the final CEO + CHRO step; Tier 1 and Tier 3 hold-lift chains; Stockroom Custodian lands on Inventory and receives under Procurement.
+- Dashboard: Other tile and Ready for sign-off (TQS) indicator; one low-stock rule for Dashboard, Executive, Procurement and Inventory.
+- Gate: stored EIR shows both itemized inspections; approved late-encoding example LE-00097 keeps its Credit Memo, released invoice line and corrected date.
+- Allocation / Park & Fix: effective rate and source on New unit request; proposed contract-unit limit setting; handling-in charge, Fix only, itemized Handling / Repair / Park / VAT / Total on form, receipt and Debit Memo; DYM sign-off; last client; completed Park & Repair example PF-3.
+- Rescue / repair: record-linked notices with delivery state and urgent SMS repeats; Debit Memo links; zero-activity months; per-system repair closure, after-repair photos, EIR-Out closure trail and chargeable example JO-MNL-000440.
+- Clients / bonds / collections / assets / compliance: signatory ID and specimen; sales-information and request-detail stage settings; cash-bond pointer at accreditation; Pending Admin, awaiting-refund and refunded bond examples; monitoring report withdrawal / refund columns; courier delivery results; legal final-demand record; tool issue and return log; regional counts for every unit category.
+- Mock DB version 16: saved demo data reloads once on first load.
+
+**Result:** Typecheck clean · 58/58 unit tests (17 new V1.4 regression tests) · production build and no-CDN check pass.
+
 ## 16-Nov-2026
 
 ### Staff review 1.2 — audit report with screenshots `Report`

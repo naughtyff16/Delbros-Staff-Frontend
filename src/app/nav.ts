@@ -64,7 +64,7 @@ export const NAV: NavGroup[] = [
       { to: '/inventory/transactions', label: 'Stock Transactions', icon: ArrowLeftRight, perm: 'inv.txn', screen: 'SCR-28' },
     ],
   },
-  { label: 'Procurement', items: [{ to: '/procurement', label: 'PR / PO / RR / RFP', icon: ShoppingCart, perm: 'prc.pr', screen: 'SCR-30–32' }] },
+  { label: 'Procurement', items: [{ to: '/procurement', label: 'PR / PO / RR / RFP', icon: ShoppingCart, perm: 'prc.pr|prc.po|prc.rr', screen: 'SCR-30–32' }] },
   {
     label: 'Compliance', items: [
       { to: '/regulatory', label: 'Registrations', icon: BadgeCheck, perm: 'reg.registration', screen: 'SCR-42' },

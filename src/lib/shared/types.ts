@@ -64,7 +64,9 @@ export type RoleCode =
   // Staff review 1.2 (sign-in picker): proposed roles, pending Delbros confirmation of their exact permissions.
   | 'BRANCH_HEAD' | 'DISPATCHER' | 'GATE_CLERK';
 
-export interface ContactPerson { id: string; firstName: string; lastName: string; phone: string; email: string; isPrimary?: boolean; isSignatory?: boolean; /** Review 1.2: position / designation; also the billing contact. */ position?: string; isBilling?: boolean }
+export interface ContactPerson { id: string; firstName: string; lastName: string; phone: string; email: string; isPrimary?: boolean; isSignatory?: boolean; /** Review 1.2: position / designation; also the billing contact. */ position?: string; isBilling?: boolean;
+  /** Staff UI changes V1.4 (row 42, CLT-002/003): identification and specimen signature of an authorised signatory (proposed field set, pending Delbros). */
+  signatoryEvidence?: { idType: string; idNumber: string; idExpiry?: string; idFile?: string; specimenFile?: string; verifiedBy?: string; verifiedAt?: string } }
 
 export interface Client {
   clientCode: string; clientName: string; billingName: string; qbName?: string;
@@ -170,7 +172,11 @@ export interface Asset {
   statusSince?: string; pmResponsible?: string; sourceRef?: string; meterHours?: number;
   maintenanceLog?: { date: string; type: 'Preventive' | 'Corrective' | 'Inspection'; notes: string; joNo?: string; by: string; performedBy?: string; cost?: number; meterHours?: number }[];
   disposal?: { action: 'Retire' | 'Dispose'; reason: string; workflowId: string; status: 'Pending Approval' | 'Approved' | 'Rejected'; requestedAt: string };
+  /** Staff UI changes V1.4 (row 50): tools issued to individual users / departments and their (partial) returns with condition. */
+  issues?: ToolIssue[];
 }
+export interface ToolIssue { id: string; issuedTo: string; qty: number; issuedAt: string; issuedBy: string; purpose?: string; conditionOut: string; dueBack?: string;
+  returns: { qty: number; at: string; by: string; condition: string; notes?: string }[] }
 
 export interface EwaUnit { equipmentType: string; qty: number; usedChassis: string[] }
 export interface Ewa {
@@ -205,6 +211,9 @@ export interface LateEncoding {
   id: string; gatePassNo: string; originalDate: string; correctedDate: string; daysLate: number; reason: string;
   path: 'AUTO' | 'CREDIT_MEMO'; workflowId?: string; status: 'Posted' | 'Pending Approval' | 'Approved' | 'Rejected'; createdAt: string; createdBy: string;
   memoNo?: string; attachment?: string;
+  /** Staff UI changes V1.4 (row 19): final state kept on the record after DYM + Treasury approval — when it was approved and the
+   *  invoice lines the Credit Memo released (they are no longer "held", so the link would otherwise be lost). */
+  approvedAt?: string; releasedLines?: { invoiceNo: string; lineId: string; description: string; days?: number; amount: number }[];
 }
 
 export interface JobOrder {
@@ -219,6 +228,11 @@ export interface JobOrder {
   chargeClientCode?: string;
   holdReason?: string;
   history?: { at?: string; by?: string; status: string; note?: string }[];
+  /** Staff UI changes V1.4: per-repair-system closure (row 32, ALO-004 — rule pending), after-repair photos taken at Close by R&M
+   *  (row 33; `photos` are the before / damage photos) and the departure that closed the JO "by EIR Out" (row 34). */
+  systemsClosed?: { system: RepairCategory; at: string; by: string }[];
+  afterPhotos?: string[];
+  eirOut?: { gatePassNo: string; eirNo: string; at: string };
 }
 export interface BomLine { partCode: string; description: string; qty: number; unitCost: number }
 // DBL-RM-007 shift split (windows pending Q-RM-02); legacy 'Day' / 'Night' entries read as Morning / Evening.
@@ -338,10 +352,15 @@ export interface Memo {
 }
 
 export interface HoldEvent { id: string; clientCode: string; type: 'Auto Hold' | 'Manual Hold' | 'Reactivated' | 'Re-Hold'; at: string; by: string; outstanding: number; daysOverdue?: number; invoiceNo?: string; reason?: string; effectiveDate?: string; approvedBy?: string; workflowId?: string }
-export interface SoaSend { id: string; soaNo: string; at: string; by: string; channel: 'Email' | 'Courier'; to: string; trackingNo?: string }
+/** Staff UI changes V1.4 (rows 48–49): courier / delivery evidence for an SOA or a final demand letter. */
+export interface DeliveryResult { status: 'In transit' | 'Delivered' | 'Returned'; at?: string; receivedBy?: string; podFile?: string; recordedBy?: string; notes?: string }
+export interface SoaSend { id: string; soaNo: string; at: string; by: string; channel: 'Email' | 'Courier'; to: string; trackingNo?: string; courier?: string; recipientName?: string; delivery?: DeliveryResult }
+/** Row 49 (CNC-006): the final demand letter issued by the Legal department — the last collection step. */
+export interface DemandLetterRecord { letterRef: string; legalOwner: string; approvedBy?: string; approvedAt?: string; issuedAt: string; file?: string; amount: number; recipient: string; channel: 'Courier' | 'Personal service' | 'Registered mail'; courier?: string; trackingNo?: string; delivery: DeliveryResult }
 export interface CollectionCase { clientCode: string; stage: CollectionStage; stageChangedAt?: string; nextActionDue?: string; actions: { at: string; action: string; by: string; notes?: string; letter?: string }[]; soaSends?: SoaSend[]; acknowledgedAt?: string; pendingWorkflowId?: string;
   /** Staff review 1.2 (SCR-39): collection owner, last client contact and promise-to-pay. */
-  ownerUserId?: string; lastContactAt?: string; promiseToPay?: { date: string; amount: number; recordedAt: string; by: string; notes?: string } }
+  ownerUserId?: string; lastContactAt?: string; promiseToPay?: { date: string; amount: number; recordedAt: string; by: string; notes?: string };
+  demandLetter?: DemandLetterRecord }
 // DBL-CNC-001 authorised override of one blocked gate, time-boxed.
 export interface GateOverride { id: string; clientCode: string; action: string; reason: string; validUntil: string; requestedBy: string; requestedAt: string; workflowId: string; status: 'Pending' | 'Approved' | 'Rejected'; approvedBy?: string; approvedAt?: string }
 
@@ -390,6 +409,9 @@ export interface NotificationRule {
 export interface AppNotification { id: string; at: string; title: string; body: string; link?: string; read: boolean; requiresAck: boolean; ackAt?: string; userId: string;
   /** Staff review 1.2: category, the notification rule that produced it, channels used, recipient role, who acknowledged, archived flag. */
   category?: 'Approval' | 'Security' | 'Escalation' | 'Delivery' | 'System' | 'Operations' | 'Finance' | 'Compliance'; ruleId?: string; channels?: string[]; recipientRole?: string; ackBy?: string; archived?: boolean;
+  /** Staff UI changes V1.4 (rows 30–31): per-channel delivery state. In-App is Sent when written; Email / SMS stay "Queued" until the
+   *  mail / SMS service reports Sent or Failed (the demo never claims a queued message was delivered). */
+  delivery?: { channel: string; state: 'Sent' | 'Queued' | 'Failed'; at?: string }[];
 }
 export interface AuditEvent {
   id: string; at: string; actor: string; action: string; entityType: string; entityId: string; branchCode?: string; before?: unknown; after?: unknown; reason?: string;
@@ -400,7 +422,12 @@ export interface AuditEvent {
 }
 export interface ParkFixRecord { id: string; chassisNo: string; clientCode: string; branchCode: string; parkInAt: string; reason: 'Idle' | 'Awaiting Repair' | 'Client Request'; parkOutAt?: string; dailyRate: number; status: 'Parked' | 'Released';
   // Gate-receipt pattern + billing feed (DBL-ALO-005)
-  clientOwned?: boolean; chassisType?: string; plateNo?: string; service?: 'Park only' | 'Park & Repair'; joNo?: string; expectedParkOut?: string;
+  clientOwned?: boolean; chassisType?: string; plateNo?: string; service?: 'Park only' | 'Park & Repair' | 'Fix only'; joNo?: string; expectedParkOut?: string;
+  /** Staff UI changes V1.4: handling-in charge (row 22, proposed setting) and when it is billed; the final itemized charges stored at park-out
+   *  (row 23); DYM sign-off on the receipt (row 21); amounts already billed on interim long-stay memos (row 26). */
+  handlingIn?: number; handlingTiming?: 'park_in' | 'park_out'; handlingDmNo?: string;
+  charges?: { handling: number; repair: number; park: number; net: number; vat: number; total: number; interimBilled: number; due: number; vatBasis: 'inclusive' | 'exclusive'; repairSource?: string };
+  dymSignoff?: { by: string; at: string; note?: string }; interimBilled?: number;
   rateOverrideReason?: string; inReceiptNo?: string; outReceiptNo?: string; reprintCount?: number;
   parkIn?: ParkFixGate; parkOut?: ParkFixGate; billingStatus?: 'Unbilled' | 'Billed'; debitMemoNo?: string; billedAmount?: number;
   /** Staff review 1.2: Park & Repair scope / estimate and the client's parking agreement reference. */

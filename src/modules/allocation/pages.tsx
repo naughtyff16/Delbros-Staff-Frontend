@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRightLeft, Camera, CircleCheck, FileText, ParkingSquare, Plus, Printer, Receipt, RefreshCw, Search, X } from 'lucide-react';
 import { api } from '../../lib/api-client';
-import { REPAIR_CATEGORIES, regIsNear, regIsValid, formatDate, formatDateTime, formatPhp, manilaDay, todayManila, type InspectionLine, type RepairCategory } from '../../lib/shared';
+import { FLEET_OTHER_STATUSES, REPAIR_CATEGORIES, regIsNear, regIsValid, formatDate, formatDateTime, formatPhp, manilaDay, todayManila, type InspectionLine, type RepairCategory } from '../../lib/shared';
 import {
   Badge, Banner, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, EmptyState, FormGrid, FormSection, InspectionChecklist, Input, KeyValueGrid, KpiTile, Modal, MoneyInput,
   PageHeader, ReadField, Segmented, Select, SignaturePad, Stack, StatusBadge, Tabs, Textarea, cn, type ColumnDef,
@@ -14,7 +14,7 @@ import { DocFooter, DocHeader, PrintPreview } from '../../shared/print';
 
 const REGIONS = ['Luzon', 'Visayas', 'Mindanao'].map((r) => ({ value: r, label: r }));
 const STATUSES = ['Available', 'Allocated', 'On Hire', 'Rescue', 'Breakdown', 'In Repair', 'Parked'];
-const OTHER = ['New', 'Unaccounted', 'Legal', 'Converted', 'Sold', 'Killed'];
+const OTHER = FLEET_OTHER_STATUSES; // V1.4 row 13: same mapping as the Dashboard "Other" tile
 const CATS = ['TQS', 'Roadworthy', 'Minor Repair', 'Major Repair'] as const;
 const today = todayManila; // review 1.1: "today" is the Manila day (the UTC date was a day behind before 08:00)
 const regTone = (s?: string) => (s === 'Expired' || s === 'Missing' ? 'danger' : regIsNear(s) ? 'warning' : 'success');
@@ -254,6 +254,9 @@ function UnitRequestsPanel({ canAdd, canEdit, onFind }: { canAdd: boolean; canEd
   const branchAvail = (board.data ?? []).filter((r) => r.branchCode === v.branchCode && r.status === 'Available' && r.regState !== 'Expired' && r.regState !== 'Missing').length;
   const returnBeforePickup = !!v.expectedReturn && !!v.targetPickupDate && v.expectedReturn < v.targetPickupDate;
   const overUnits = !!ct && ct.usage.total + (v.qty || 0) > ct.usage.contracted;
+  const { setting: unitSetting } = useRefLookups();
+  const blockOver = unitSetting('alo.contract_unit_limit') === 'block'; // V1.4 row 51 (proposed setting)
+  const rate = ct?.rates?.find((r) => r.equipmentType === v.equipmentType); // V1.4 row 20 (ALO-001)
   const detailRow = detail ? (data.data ?? []).find((r) => r.reqNo === detail) : undefined;
   const hereN = (board.data ?? []).filter((r) => okUnit(r) && r.branchCode === v.branchCode).length;
   const elsewhereN = (board.data ?? []).filter((r) => okUnit(r) && r.branchCode !== v.branchCode && r.region === brRegion).length;
@@ -310,15 +313,24 @@ function UnitRequestsPanel({ canAdd, canEdit, onFind }: { canAdd: boolean; canEd
         </FormGrid>
         {/* Review 1.1 / 1.2: what the user will get, before submitting — live availability shows as soon as a branch is picked. */}
         <div className="mt-4 rounded-lg border border-line bg-surface-alt p-3">
-          <KeyValueGrid cols={3} items={[
+          <KeyValueGrid cols={4} items={[
             { label: 'Contract type / term', value: ct ? <span><Badge tone="neutral" dot={false}>{ct.contractType}</Badge> <span className="text-xs text-muted">{formatDate(ct.effectiveDate)} – {ct.expiryDate ? formatDate(ct.expiryDate) : 'open-ended'}</span></span> : <span className="text-sm text-muted">Select a contract</span> },
             { label: 'Monetary requirement', value: ct ? <span className="flex flex-col items-start gap-0.5"><Badge tone={monTone(ct.monetary.status)}>{ct.monetary.status}</Badge><span className="text-xs text-muted">{ct.monetary.note}</span></span> : <span className="text-sm text-muted">Select a contract</span> },
             { label: 'Live availability', value: !v.branchCode ? <span className="text-sm text-muted">Select a pickup branch</span> : board.isLoading ? 'Checking…' : v.equipmentType
               ? <span>{hereN} {eqName(v.equipmentType)} available at {v.branchCode}{brRegion ? `, ${elsewhereN} elsewhere in ${brRegion}` : ''}{repairN ? <span className="block text-xs text-muted">{repairN} of this type in repair at {v.branchCode}</span> : null}</span>
               : <span>{branchAvail} available at {v.branchCode} (all types)<span className="block text-xs text-muted">Pick a chassis type for the matching count</span></span> },
+            // Staff UI changes V1.4 (row 20, ALO-001): the effective rate for the chosen type, its unit of charge and where it comes from.
+            { label: 'Effective rate', value: !ct ? <span className="text-sm text-muted">Select a contract</span> : !v.equipmentType ? <span className="text-sm text-muted">Select a chassis type</span> : rate
+              ? <span className="flex flex-col items-start gap-0.5"><span className="font-semibold tabular">{formatPhp(rate.dailyRate)} <span className="font-normal text-muted">per unit per day</span></span>
+                <span className="text-xs text-muted">Source: contract {ct.contractNo} rate snapshot ({ct.contractType}{ct.contractClass ? ` · ${ct.contractClass}` : ''})</span>
+                {rate.templateRate != null && rate.templateRate !== rate.dailyRate
+                  ? <Badge tone="purple" dot={false}>Custom rate · template {formatPhp(rate.templateRate)}</Badge>
+                  : <Badge tone="neutral" dot={false}>{rate.templateRate != null ? 'Same as the rate-card template' : 'Contract rate'}</Badge>}</span>
+              : <span className="text-sm text-warning">Not rated on this contract</span> },
           ]} />
           {ct && <p className="mt-2 text-xs text-muted">Contract units: {ct.usage.onHire} on hire + {ct.usage.allocated} allocated + {ct.usage.requested} still requested = {ct.usage.total} of {ct.usage.contracted} contracted.</p>}
-          {overUnits && <p className="mt-1 text-xs font-medium text-warning">This request takes the contract over its contracted units — confirm with the Account Executive (limit rule pending confirmation).</p>}
+          {rate && <p className="mt-1 text-xs text-muted">The rate is fixed by the signed contract; a request cannot change it. Overriding a custom rate needs a contract amendment (new version) approved by the Sales Director — who may approve the override is pending Delbros confirmation.</p>}
+          {overUnits && <p className={cn('mt-1 text-xs font-medium', blockOver ? 'text-danger' : 'text-warning')}>{blockOver ? 'This request takes the contract over its contracted units — blocked by the contracted-unit limit setting. Amend the contract or reduce the quantity.' : 'This request takes the contract over its contracted units — warning only; confirm with the Account Executive. Whether to block or allow a controlled override is pending Sales / Operations approval (Admin → Settings → Allocation).'}</p>}
           {v.branchCode && v.equipmentType && !board.isLoading && hereN + elsewhereN < v.qty && <p className="mt-2 text-xs text-warning">Fewer roadworthy units with current OR/CR than requested — the request can still be logged; allocation waits for repairs, sign-off or a transfer.</p>}
           <p className="mt-2 text-xs text-muted">Availability counts Available units with current or near-expiry OR/CR only (expired registration and units awaiting sign-off are excluded). One chassis type per request; a quantity above 1 is one request that collects several allocated units. Status: <b>Open</b> → <b>Partially allocated</b> → <b>Fulfilled</b> (all units allocated) → released at <b>Gate Out</b> (unit On hire). The new UR number is shown on save.</p>
         </div>
@@ -518,7 +530,28 @@ function GateFields({ g, setG, error }: { g: GateForm; setG: (g: GateForm) => vo
   );
 }
 
-function ParkReceipt({ r, which, eqName }: { r: PfRow; which: 'in' | 'out'; eqName: (c?: string) => string }) {
+/** Staff UI changes V1.4 (rows 23, 25, 54): itemized Park & Fix charges — Handling, Repair, Park charge, VAT, Total (same numbers as the Debit Memo). */
+function ParkCharges({ r, print }: { r: PfRow; print?: boolean }) {
+  const c = r.charges;
+  const rows: [string, string, number][] = [
+    ['Handling-in', r.handlingTiming === 'park_in' ? `Billed at park-in${r.handlingDmNo ? ` on ${r.handlingDmNo}` : ''} (${formatPhp(r.handlingIn ?? 0)})` : r.handlingIn ? 'Per trailer (configured, proposed amount)' : 'Not charged on this record', c.handling],
+    ['Repair', r.service === 'Park only' || !r.service ? 'Park only — no repair' : c.repairSource ?? '—', c.repair],
+    ['Park charge', r.service === 'Fix only' ? 'Fix only — no parking fee' : `${r.days} day(s) × ${formatPhp(r.dailyRate)} (per started day)`, c.park],
+  ];
+  const cell = print ? 'border border-black/30 px-1 py-0.5' : 'px-3 py-1.5';
+  return (
+    <table className={cn('w-full', print ? 'border border-black/50' : 'overflow-hidden rounded-lg border border-line text-sm')}>
+      <tbody>
+        {rows.map(([k, note, v]) => <tr key={k} className={print ? '' : 'border-b border-line'}><td className={cn(cell, 'font-medium')}>{k}</td><td className={cn(cell, print ? '' : 'text-xs text-muted')}>{note}</td><td className={cn(cell, 'text-right tabular')}>{formatPhp(v)}</td></tr>)}
+        <tr className={print ? '' : 'border-b border-line'}><td className={cn(cell, 'font-medium')}>VAT (12%)</td><td className={cn(cell, print ? '' : 'text-xs text-muted')}>{c.vatBasis === 'inclusive' ? `Included in the amounts above (net ${formatPhp(c.net)})` : 'Added on top of the amounts above'} · VAT basis pending Finance approval</td><td className={cn(cell, 'text-right tabular')}>{formatPhp(c.vat)}</td></tr>
+        {c.interimBilled > 0 && <tr className={print ? '' : 'border-b border-line'}><td className={cn(cell, 'font-medium')}>Less interim bills</td><td className={cell}>Long-stay interim Debit Memos already billed</td><td className={cn(cell, 'text-right tabular')}>−{formatPhp(c.interimBilled)}</td></tr>}
+        <tr className={print ? 'bg-black/5' : 'bg-surface-alt'}><td className={cn(cell, 'font-semibold')}>Total</td><td className={cn(cell, print ? '' : 'text-xs text-muted')}>{r.status === 'Released' ? `Billed on ${r.debitMemoNo ?? '—'}` : 'Estimate to date — final on park-out'}</td><td className={cn(cell, 'text-right font-semibold tabular')}>{formatPhp(c.due)}</td></tr>
+      </tbody>
+    </table>
+  );
+}
+
+function ParkReceipt({ r, which, eqName, userName }: { r: PfRow; which: 'in' | 'out'; eqName: (c?: string) => string; userName: (id?: string) => string }) {
   const g = which === 'in' ? r.parkIn : r.parkOut;
   const reprint = r.reprintCount ?? 0;
   return (
@@ -533,7 +566,8 @@ function ParkReceipt({ r, which, eqName }: { r: PfRow; which: 'in' | 'out'; eqNa
           ['TRUCKER', `${g?.trucker ?? ''} · Plate ${g?.truckPlateNo ?? ''}${g?.truckOrcr ? ` · OR/CR ${g.truckOrcr}` : ''}`, 'DRIVER / LICENCE', `${g?.driverName ?? ''} · ${g?.driverLicenseNo ?? ''}`],
           ...(r.agreementRef ? [['AGREEMENT', r.agreementRef, 'RATE BASIS', 'Per started day · VAT basis pending confirmation']] : []),
           ['PARK-IN', formatDateTime(r.parkInAt), which === 'out' ? 'PARK-OUT' : 'EXPECTED PARK-OUT', which === 'out' ? formatDateTime(r.parkOutAt) : formatDate(r.expectedParkOut)],
-          ['DAILY RATE', `${formatPhp(r.dailyRate)}${r.rateOverrideReason ? ' (override)' : ''}`, which === 'out' ? 'DAYS × RATE' : 'BILLING', which === 'out' ? `${r.days} × ${formatPhp(r.dailyRate)} = ${formatPhp(r.billedAmount ?? r.amountToDate)}` : 'Charged on park-out (Debit Memo)'],
+          ['DAILY RATE', `${formatPhp(r.dailyRate)}${r.rateOverrideReason ? ' (override)' : ''}${r.service === 'Fix only' ? ' · not charged (Fix only)' : ''}`, which === 'out' ? 'DAYS × RATE' : 'BILLING', which === 'out' ? `${r.days} × ${formatPhp(r.dailyRate)} = ${formatPhp(r.charges.park)}` : 'Charged on park-out (Debit Memo)'],
+          ['HANDLING-IN', `${formatPhp(r.handlingIn ?? 0)}${r.handlingTiming === 'park_in' ? ` · billed at park-in${r.handlingDmNo ? ` (${r.handlingDmNo})` : ''}` : ' · billed at park-out'}`, 'VAT BASIS', `${r.charges.vatBasis === 'inclusive' ? 'VAT-inclusive' : 'VAT-exclusive'} (pending Finance approval)`],
           ...(which === 'out' ? [['DEBIT MEMO', r.debitMemoNo ?? '—', 'BILLING STATUS', r.billingStatus]] : []),
         ].map((x, i) => <tr key={i}><td className="w-28 py-0.5 font-semibold">{x[0]}</td><td className="py-0.5">{x[1]}</td><td className="w-36 py-0.5 font-semibold">{x[2]}</td><td className="py-0.5">{x[3]}</td></tr>)}
       </tbody></table>
@@ -544,8 +578,11 @@ function ParkReceipt({ r, which, eqName }: { r: PfRow; which: 'in' | 'out'; eqNa
       </table>
       {g?.remarks && <p className="mt-1">Remarks: {g.remarks}</p>}
       {g?.photos?.length ? <p className="mt-1">Photos: {g.photos.join(', ')}</p> : null}
-      <div className="mt-6 grid grid-cols-2 gap-10">
-        <div><p className="font-semibold">Received / released by (depot)</p><p className="mt-8 border-t border-black/60">{g?.by}</p></div>
+      {which === 'out' && <><p className="mb-1 mt-3 font-semibold">CHARGES</p><ParkCharges r={r} print /></>}
+      <div className="mt-6 grid grid-cols-3 gap-8">
+        <div><p className="font-semibold">Received / released by (depot)</p><p className="mt-8 border-t border-black/60">{userName(g?.by)}</p></div>
+        {/* V1.4 row 21: Deputy Yard Manager sign-off, as on the legacy receipt. */}
+        <div><p className="font-semibold">Noted by (Deputy Yard Manager)</p><p className="mt-8 border-t border-black/60">{r.dymSignoff ? `${userName(r.dymSignoff.by)} · ${formatDateTime(r.dymSignoff.at)}` : ' '}</p></div>
         <div><p className="font-semibold">Driver</p>{g?.signature ? <img src={g.signature} alt="Driver signature" className="h-12" /> : <div className="h-12" />}<p className="border-t border-black/60">{g?.driverName}</p></div>
       </div>
       <p className="mt-3 text-[10px]">The client's trailer is stored at the depot for a duration-based fee. It is not part of the Delbros fleet.</p>
@@ -562,7 +599,11 @@ export function ParkFixPage() {
   const rate = Number(setting('alo.parkfix_daily_rate') ?? 350);
   const canOverride = can('alloc.parkfix', 'approve');
   const [open, setOpen] = useState(false);
-  const blank = { chassisNo: '', plateNo: '', chassisType: '', clientCode: '', branchCode: 'MNL', reason: 'Idle' as 'Idle' | 'Awaiting Repair' | 'Client Request', service: 'Park only' as 'Park only' | 'Park & Repair', repairCategories: [] as RepairCategory[], expectedParkOut: '', dailyRate: rate, rateOverrideReason: '', repairScope: '', repairEstimate: 0, agreementRef: '' };
+  const handlingIn = Number(setting('alo.parkfix_handling_in') ?? 0), handlingAtIn = setting('alo.parkfix_handling_timing') === 'park_in'; // V1.4 row 22 (proposed)
+  const vatBasis = String(setting('alo.parkfix_vat_basis') ?? 'inclusive'), longStay = String(setting('alo.parkfix_long_stay') ?? 'park_out_only'); // V1.4 rows 25–26 (proposed)
+  const [dym, setDym] = useState<PfRow | null>(null);
+  const dymSign = useAction(() => api.alloc.parkFixDymSignoff(dym!.id), { success: 'Deputy Yard Manager sign-off recorded — printed on both receipts', onSuccess: () => setDym(null) });
+  const blank = { chassisNo: '', plateNo: '', chassisType: '', clientCode: '', branchCode: 'MNL', reason: 'Idle' as 'Idle' | 'Awaiting Repair' | 'Client Request', service: 'Park only' as 'Park only' | 'Park & Repair' | 'Fix only', repairCategories: [] as RepairCategory[], expectedParkOut: '', dailyRate: rate, rateOverrideReason: '', repairScope: '', repairEstimate: 0, agreementRef: '' };
   const [view, setView] = useState<string | null>(null); // staff review 1.2: detail view
   const [v, setV] = useState(blank);
   const [g, setG] = useState<GateForm>(blankGate());
@@ -589,6 +630,8 @@ export function ParkFixPage() {
     <>
       <PageHeader title="Park & Fix" description="Value-added service: Delbros stores a client's own trailer at a depot for a duration-based fee, optionally with repairs (Job Order). Park-in / park-out use the gate-receipt pattern; the fee is billed by Debit Memo on park-out."
         actions={can('alloc.parkfix', 'add') && <Button icon={<ParkingSquare className="size-4" />} onClick={() => setOpen(true)}>Park in</Button>} />
+      {/* V1.4 row 52: "Parked" (fleet status) vs Park & Fix (this service) — proposed meaning, pending Delbros confirmation. */}
+      <Banner className="mb-4" tone="info" title="Park & Fix is not the fleet status “Parked”">Park &amp; Fix holds <b>client-owned</b> trailers for a fee (ALO-005, Could) — they are never in the Delbros fleet, Available, allocation or DCIR totals. The Dashboard / Allocation status <b>Parked</b> is a <b>Delbros fleet unit</b> set aside, not for hire. This split is the proposed reading of the legacy flow; Delbros to confirm, including the allowed entry / exit transitions of a fleet unit into Parked.</Banner>
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile label="Parked now" value={rows.filter((r) => r.status === 'Parked').length} onClick={() => setF({ ...f, status: 'Parked' })} />
         <KpiTile label="Unbilled amount to date" value={formatPhp(rows.filter((r) => r.billingStatus === 'Unbilled').reduce((a, r) => a + r.amountToDate, 0))} tone="warning" />
@@ -597,13 +640,16 @@ export function ParkFixPage() {
       </div>
       <DataTable<PfRow> data={data.data} loading={data.isLoading} exportName="park-and-fix" emptyTitle="No parked units" emptyHint="Use Park in to receive a client's trailer." columns={[
         { accessorKey: 'chassisNo', header: 'Trailer', cell: (c) => <span className="flex flex-col items-start gap-1"><button className="whitespace-nowrap font-mono font-medium text-brand-700 hover:underline" title="Open the Park & Fix detail" onClick={() => setView(c.row.original.id)}>{c.getValue<string>()}</button><span className="whitespace-nowrap text-xs text-muted">{c.row.original.plateNo ?? '—'} · {eqName(c.row.original.chassisType)}</span>{c.row.original.clientOwned && <Badge tone="neutral" dot={false}>Client-owned</Badge>}</span> },
-        { accessorKey: 'clientName', header: 'Client', cell: (c) => <span className="block min-w-36">{c.getValue<string>()}</span> }, { accessorKey: 'branchCode', header: 'Depot' },
+        // V1.4 row 53: client = the trailer owner / current customer; "Last client" = the client on the trailer's previous Park & Fix visit (proposed mapping of the legacy log field).
+        { accessorKey: 'clientName', header: 'Client / last client', cell: (c) => { const r = c.row.original; return <span className="block min-w-36">{c.getValue<string>()}<span className="block text-xs text-muted" title="Client on this trailer's previous Park & Fix visit (proposed meaning of the legacy “last client” field — pending confirmation)">Last: {r.lastClient ? `${r.lastClient.clientName} (${r.lastClient.id})` : 'first visit'}</span></span>; } },
+        { accessorKey: 'branchCode', header: 'Depot' },
         { id: 'svc', header: 'Service / reason', cell: (c) => <span className="flex flex-col items-start gap-0.5"><span className="whitespace-nowrap">{c.row.original.service ?? 'Park only'}</span>{c.row.original.joNo && <Link to={`/repair/jo/${c.row.original.joNo}`} className="whitespace-nowrap text-xs text-brand-700 hover:underline">{c.row.original.joNo} · {c.row.original.joStatus ?? '—'}</Link>}<span className="whitespace-nowrap text-xs text-muted">{c.row.original.reason}</span></span> },
         { accessorKey: 'parkInAt', header: 'Period', cell: (c) => { const r = c.row.original; return <span className="flex flex-col whitespace-nowrap"><span>In {formatDateTime(r.parkInAt)}</span>
           <span className="font-mono text-xs text-muted" title="Receipt numbers">{r.inReceiptNo ?? '—'}{r.outReceiptNo ? ` · ${r.outReceiptNo}` : ''}</span>
           {r.parkOutAt ? <span className="text-xs text-muted">Out {formatDateTime(r.parkOutAt)}</span> : <span className={cn('text-xs', overdue(r) ? 'font-semibold text-danger' : 'text-muted')}>Expected out {formatDate(r.expectedParkOut)}</span>}</span>; } },
         { accessorKey: 'amountToDate', header: 'Amount to date', meta: { align: 'right' }, cell: (c) => { const r = c.row.original; return <span className="flex flex-col items-end whitespace-nowrap"><span className="font-medium">{formatPhp(c.getValue<number>())}</span>
-          <span className="inline-flex items-center gap-1 text-xs text-muted" title={r.rateOverrideReason}>{r.days} d × {formatPhp(r.dailyRate)}{r.rateOverrideReason && <Badge tone="warning" dot={false}>override</Badge>}</span></span>; } },
+          <span className="inline-flex items-center gap-1 text-xs text-muted" title={r.rateOverrideReason}>{r.service === 'Fix only' ? 'Fix only · no parking fee' : `${r.days} d × ${formatPhp(r.dailyRate)}`}{r.rateOverrideReason && <Badge tone="warning" dot={false}>override</Badge>}</span>
+          <span className="text-xs text-muted" title={`Handling ${formatPhp(r.charges.handling)} · Repair ${formatPhp(r.charges.repair)} · Park ${formatPhp(r.charges.park)} · VAT ${formatPhp(r.charges.vat)} (${r.charges.vatBasis})`}>H {formatPhp(r.charges.handling)} · R {formatPhp(r.charges.repair)} · VAT {formatPhp(r.charges.vat)}</span></span>; } },
         // Status = park state; billing (Unbilled / Billed + Debit Memo) is the second line — no duplicate "Billed" chip.
         { accessorKey: 'displayStatus', header: 'Status / billing', meta: { nowrap: true }, cell: (c) => { const r = c.row.original; return <span className="flex flex-col items-start gap-1"><StatusBadge domain="generic" value={r.status === 'Released' ? 'Parked out' : 'Parked'} />
           {r.debitMemoNo ? <Link to={`/billing/memos?q=${r.debitMemoNo}`} className="text-xs text-brand-700 hover:underline">Billed {r.debitMemoNo} · {formatPhp(r.billedAmount)}</Link> : <span className="text-xs text-muted">{r.billingStatus}</span>}</span>; } },
@@ -617,7 +663,7 @@ export function ParkFixPage() {
         <Select aria-label="Depot" value={f.branch} onChange={(e) => setF({ ...f, branch: e.target.value })} placeholder="All depots" options={branchOptions} />
         <Select aria-label="Client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} placeholder="All clients" options={clientOptions} />
       </>} />
-      <p className="mt-2 text-xs text-muted">Daily rate {formatPhp(rate)}/day from configuration (System settings → Allocation), charged per started day and billed by one Debit Memo on park-out. VAT basis of the rate and the Debit Memo, and billing rules for repairs and long stays, are pending confirmation. Park &amp; Repair rows show their job order under Service; an overridden rate shows an “override” tag (reason on hover). Click a trailer number for the full record.</p>
+      <p className="mt-2 text-xs text-muted">Daily rate {formatPhp(rate)}/day and handling-in {formatPhp(handlingIn)} per trailer ({handlingAtIn ? 'billed at park-in' : 'billed at park-out'}) from configuration (System settings → Allocation). Amounts are VAT-{vatBasis}; repair charges come from the job order (actual parts + labor once it is closed). Long stays: {longStay === 'monthly_interim' ? 'interim Debit Memo every 30 days, the park-out bill deducts what was already billed' : 'billed once at park-out'}. The VAT basis, handling-in amount / timing and long-stay rule are proposed values pending Finance approval. Park &amp; Repair and Fix only rows show their job order under Service; an overridden rate shows an “override” tag. Click a trailer number for the full record and the itemized charges.</p>
       <Modal open={open} onClose={() => setOpen(false)} title="Park-in" size="xl" footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button loading={parkIn.isPending} disabled={!v.chassisNo || !v.clientCode} onClick={() => parkIn.mutate(undefined)}>Park in &amp; print receipt</Button></>}>
         <Stack>
           {parkIn.error && <Banner tone="danger">{errMessage(parkIn.error)}</Banner>}
@@ -633,14 +679,17 @@ export function ParkFixPage() {
               <ReadField label="Park-in time · received by · receipt"><span className="text-sm text-muted">Set on save: now · {user?.name ?? 'you'} · next PFR-IN no.</span></ReadField>
             </FormGrid>
           </FormSection>
-          <FormSection title="Service & rate" actions={<Segmented value={v.service} onChange={(s) => setV({ ...v, service: s })} options={[{ value: 'Park only', label: 'Park only' }, { value: 'Park & Repair', label: 'Park & Repair' }]} />}>
+          <FormSection title="Service & rate" actions={<Segmented value={v.service} onChange={(s) => setV({ ...v, service: s })} options={[{ value: 'Park only', label: 'Park only' }, { value: 'Park & Repair', label: 'Park & Repair' }, { value: 'Fix only', label: 'Fix only (proposed)' }]} />}>
             <Stack>
-              {v.service === 'Park & Repair' ? <div className="flex flex-wrap gap-3">{REPAIR_CATEGORIES.map((k) => <Checkbox key={k} label={k} checked={v.repairCategories.includes(k)} onChange={(e) => setV({ ...v, repairCategories: e.target.checked ? [...v.repairCategories, k] : v.repairCategories.filter((x) => x !== k) })} />)}<p className="w-full text-xs text-muted">A chargeable Draft Job Order is created and linked (its JO number shows in the success message, on the list and on the receipt); it follows the normal JO approval chain.</p>
+              {v.service === 'Fix only' && <Banner tone="info" title="Fix only — repair with no parking fee (proposed)">The legacy “Fix only” transaction: a chargeable Draft Job Order is created and no parking charge is generated; the park-out bill carries the handling-in and repair charges only. Whether Fix only stays in scope (or is a standalone chargeable Job Order) is pending Delbros confirmation.</Banner>}
+              {v.service !== 'Park only' ? <div className="flex flex-wrap gap-3">{REPAIR_CATEGORIES.map((k) => <Checkbox key={k} label={k} checked={v.repairCategories.includes(k)} onChange={(e) => setV({ ...v, repairCategories: e.target.checked ? [...v.repairCategories, k] : v.repairCategories.filter((x) => x !== k) })} />)}<p className="w-full text-xs text-muted">A chargeable Draft Job Order is created and linked (its JO number shows in the success message, on the list and on the receipt); it follows the normal JO approval chain.</p>
                 {/* Staff review 1.2: what Park & Repair adds — repair description and an estimate for the client. */}
                 <div className="grid w-full gap-4 md:grid-cols-3"><div className="md:col-span-2"><Textarea label="Repair requested" required rows={2} value={v.repairScope} placeholder="e.g. Replace left tail light, check brake lining" error={fieldError(parkIn.error, 'repairScope')} onChange={(e) => setV({ ...v, repairScope: e.target.value })} /></div>
                   <MoneyInput label="Estimated repair cost" value={v.repairEstimate || ''} hint="Optional — firm cost comes from the job order" error={fieldError(parkIn.error, 'repairEstimate')} onChange={(e) => setV({ ...v, repairEstimate: Number(e.target.value) || 0 })} /></div></div> : null}
               <FormGrid cols={3}>
-                {v.service !== 'Park & Repair' && <Select label="Reason" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value as typeof v.reason })} options={['Idle', 'Awaiting Repair', 'Client Request'].map((x) => ({ value: x, label: x }))} />}
+                {/* V1.4 row 22: handling-in charge (configured, proposed) — shown at park-in and carried to the receipt and the bill. */}
+                <ReadField label="Handling-in charge"><span className="text-sm"><b className="tabular">{formatPhp(handlingIn)}</b> per trailer · {handlingAtIn ? 'billed now, on its own Debit Memo' : 'billed with the park-out Debit Memo'}<span className="block text-xs text-muted">Configured (System settings → Allocation); amount and timing pending Finance approval. VAT-{vatBasis}.</span></span></ReadField>
+                {v.service === 'Park only' && <Select label="Reason" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value as typeof v.reason })} options={['Idle', 'Awaiting Repair', 'Client Request'].map((x) => ({ value: x, label: x }))} />}
                 <MoneyInput label="Daily rate" type="text" value={rateFocus ? String(v.dailyRate || '') : v.dailyRate.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} onFocus={() => setRateFocus(true)} onBlur={() => setRateFocus(false)} disabled={!canOverride} error={fieldError(parkIn.error, 'dailyRate')} hint={`${canOverride ? `Configured ${formatPhp(rate)} — overriding needs a reason` : `From configuration (${formatPhp(rate)})`}. Per started day; VAT basis pending confirmation.`} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d.]/g, '')); setV({ ...v, dailyRate: Number.isFinite(n) ? n : 0 }); }} />
                 {v.dailyRate !== rate && <Input label="Override reason" required value={v.rateOverrideReason} placeholder="Why the rate differs (kept in the audit trail)" error={fieldError(parkIn.error, 'rateOverrideReason')} onChange={(e) => setV({ ...v, rateOverrideReason: e.target.value })} />}
               </FormGrid>
@@ -652,9 +701,11 @@ export function ParkFixPage() {
       <Modal open={!!out} onClose={() => setOut(null)} title={`Park-out · ${out?.chassisNo}`} size="xl" footer={<><Button variant="secondary" onClick={() => setOut(null)}>Cancel</Button><Button loading={parkOut.isPending} onClick={() => parkOut.mutate(undefined)}>Park out, bill &amp; print receipt</Button></>}>
         {out && <Stack>
           {parkOut.error && <Banner tone="danger">{errMessage(parkOut.error)}</Banner>}
-          <KeyValueGrid items={[{ label: 'Client', value: out.clientName }, { label: 'Park-in', value: formatDateTime(out.parkInAt) }, { label: 'Park-out (now)', value: formatDateTime(new Date().toISOString()) }, { label: 'Final days × rate', value: <b>{outDays} × {formatPhp(out.dailyRate)} = {formatPhp(outDays * out.dailyRate)}</b> }]} />
-          {out.joNo && out.joStatus && !out.joStatus.startsWith('Closed') && <Banner tone="warning">Job order {out.joNo} is still {out.joStatus}. Confirm the client accepts release before repairs are closed.</Banner>}
-          <p className="text-xs text-muted">A Debit Memo for the amount is posted to billing and the park-out receipt is generated.</p>
+          <KeyValueGrid items={[{ label: 'Client', value: out.clientName }, { label: 'Park-in', value: formatDateTime(out.parkInAt) }, { label: 'Park-out (now)', value: formatDateTime(new Date().toISOString()) }, { label: 'Final days × rate', value: <b>{out.service === 'Fix only' ? 'Fix only — no parking fee' : `${outDays} × ${formatPhp(out.dailyRate)} = ${formatPhp(outDays * out.dailyRate)}`}</b> }]} />
+          {out.joNo && out.joStatus && !out.joStatus.startsWith('Closed') && <Banner tone="warning">Job order {out.joNo} is still {out.joStatus}. Confirm the client accepts release before repairs are closed — the repair line below is not final until the job order is closed.</Banner>}
+          {/* V1.4 rows 23 / 54: the itemized bill the Debit Memo will carry. */}
+          <ParkCharges r={{ ...out, days: outDays, charges: { ...out.charges, park: out.service === 'Fix only' ? 0 : outDays * out.dailyRate } }} />
+          <p className="text-xs text-muted">On park-out the charges are recalculated at this moment (days, closed job order cost), stored on the record and posted to billing as one Debit Memo with this breakdown; the park-out receipt is generated.</p>
           <GateFields g={og} setG={setOg} error={parkOut.error} />
         </Stack>}
       </Modal>
@@ -663,6 +714,7 @@ export function ParkFixPage() {
         footer={vr && <><Button variant="ghost" icon={<Receipt className="size-4" />} onClick={() => { reprint.mutate({ id: vr.id, which: 'in' }); setReceipt({ id: vr.id, which: 'in' }); setView(null); }}>In receipt</Button>
           {vr.status === 'Released' && <Button variant="ghost" icon={<Receipt className="size-4" />} onClick={() => { reprint.mutate({ id: vr.id, which: 'out' }); setReceipt({ id: vr.id, which: 'out' }); setView(null); }}>Out receipt</Button>}
           {vr.status === 'Parked' && can('alloc.parkfix', 'edit') && <Button variant="secondary" onClick={() => { setOg({ ...blankGate(), trucker: vr.parkIn?.trucker ?? '' }); setOut(vr); setView(null); }}>Park out</Button>}
+          {!vr.dymSignoff && can('alloc.parkfix', 'check') && <Button variant="secondary" onClick={() => setDym(vr)}>DYM sign-off</Button>}
           <Button onClick={() => setView(null)}>Close</Button></>}>
         {vr && <Stack>
           <KeyValueGrid cols={3} items={[
@@ -674,15 +726,22 @@ export function ParkFixPage() {
             { label: 'Park-in', value: `${formatDateTime(vr.parkInAt)} · ${vr.inReceiptNo ?? '—'}` },
             { label: vr.parkOutAt ? 'Park-out' : 'Expected park-out', value: vr.parkOutAt ? `${formatDateTime(vr.parkOutAt)} · ${vr.outReceiptNo ?? '—'}` : formatDate(vr.expectedParkOut) },
             { label: 'Daily rate', value: <span>{formatPhp(vr.dailyRate)}{vr.rateOverrideReason ? <> <Badge tone="warning" dot={false}>override</Badge> <span className="text-xs text-muted">{vr.rateOverrideReason}</span></> : <span className="text-xs text-muted"> (configured)</span>}</span> },
-            { label: vr.status === 'Released' ? 'Charged' : 'Amount to date', value: `${vr.days} d × ${formatPhp(vr.dailyRate)} = ${formatPhp(vr.status === 'Released' ? vr.billedAmount ?? vr.amountToDate : vr.amountToDate)}` },
+            { label: 'Park charge', value: vr.service === 'Fix only' ? 'None — Fix only' : `${vr.days} d × ${formatPhp(vr.dailyRate)} = ${formatPhp(vr.charges.park)}` },
+            { label: vr.status === 'Released' ? 'Total billed' : 'Estimated total to date', value: `${formatPhp(vr.status === 'Released' ? vr.billedAmount ?? vr.amountToDate : vr.amountToDate)} (handling + repair + park, VAT-${vr.charges.vatBasis} — see Charges)` },
             { label: 'Billing', value: vr.debitMemoNo ? <Link to={`/billing/memos?q=${vr.debitMemoNo}`} className="text-brand-700 hover:underline">{vr.debitMemoNo} · {formatPhp(vr.billedAmount)}</Link> : vr.billingStatus },
             { label: 'Receipt reprints', value: String(vr.reprintCount ?? 0) },
+            { label: 'Last client (previous visit)', value: vr.lastClient ? `${vr.lastClient.clientName} · ${vr.lastClient.id}${vr.lastClient.parkOutAt ? ` · out ${formatDate(vr.lastClient.parkOutAt)}` : ''}` : 'First visit (proposed meaning — pending confirmation)' },
+            // V1.4 row 21: Deputy Yard Manager sign-off (legacy receipt).
+            { label: 'Deputy Yard Manager sign-off', value: vr.dymSignoff ? `${userName(vr.dymSignoff.by)} · ${formatDateTime(vr.dymSignoff.at)}` : <span className="text-warning">Not signed yet</span> },
           ]} />
+          <FormSection title="Charges" description="Handling, Repair, Park charge, VAT and Total — the same figures as the receipt and the Debit Memo."><ParkCharges r={vr} /></FormSection>
           <FormSection title={`Park-in receipt ${vr.inReceiptNo ?? ''}`}><KeyValueGrid cols={4} items={gateItems(vr.parkIn)} /></FormSection>
           {vr.parkOut && <FormSection title={`Park-out receipt ${vr.outReceiptNo ?? ''}`}><KeyValueGrid cols={4} items={gateItems(vr.parkOut)} /></FormSection>}
         </Stack>}
       </Modal>
-      <PrintPreview open={!!rec} onClose={() => setReceipt(null)} title="Park & Fix receipt">{rec && receipt && <ParkReceipt r={rec} which={receipt.which} eqName={eqName} />}</PrintPreview>
+      <PrintPreview open={!!rec} onClose={() => setReceipt(null)} title="Park & Fix receipt">{rec && receipt && <ParkReceipt r={rec} which={receipt.which} eqName={eqName} userName={userName} />}</PrintPreview>
+      <ConfirmDialog open={!!dym} onClose={() => setDym(null)} loading={dymSign.isPending} confirmLabel="Sign off" title={`Deputy Yard Manager sign-off — ${dym?.chassisNo ?? ''}`} onConfirm={() => dymSign.mutate(undefined)}
+        message="Records your sign-off (name, date and time) on this Park & Fix record; it prints in the “Noted by (Deputy Yard Manager)” box of the park-in and park-out receipts, as on the legacy receipt. Recorded in the audit log." />
     </>
   );
 }

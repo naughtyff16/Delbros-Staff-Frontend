@@ -6,7 +6,7 @@ import {
   type Branch, type Chassis, type Client, type Contract, type EquipmentType, type Invoice, type NotificationRule,
   type Registration, type RoleCode, type User, type WorkflowInstance, type ChassisStatus, type Part,
 } from '../shared';
-import type { JobOrder, RepairCategory } from '../shared';
+import type { InspectionLine, JobOrder, RepairCategory } from '../shared';
 import type { Db } from './db';
 
 const now = () => new Date().toISOString();
@@ -89,7 +89,9 @@ export function buildSeed(): Db {
     if (l && !u.lastLogin) { const t = new Date(`${manilaDay(ago(l[0]))}T${String(Math.floor(l[1])).padStart(2, '0')}:${String(Math.round((l[1] % 1) * 60)).padStart(2, '0')}:00+08:00`).toISOString(); u.lastLogin = t > now() ? addDays(t, -1) : t; }
   });
 
-  const contact = (id: string, f: string, l: string, position = 'Operations Manager') => ({ id, firstName: f, lastName: l, phone: '+63 917 555 0101', email: `${f.toLowerCase()}@example.ph`, isPrimary: true, isSignatory: true, position });
+  const contact = (id: string, f: string, l: string, position = 'Operations Manager') => ({ id, firstName: f, lastName: l, phone: '+63 917 555 0101', email: `${f.toLowerCase()}@example.ph`, isPrimary: true, isSignatory: true, position,
+    // V1.4 row 42: the signatory's identification and specimen signature (proposed field set).
+    signatoryEvidence: { idType: "Driver's license", idNumber: `N0${id.slice(-3, -2)}-${id.slice(4, 6)}-${id.replace(/\D/g, '').padEnd(6, '0').slice(0, 6)}`, idExpiry: '2029-06-30', idFile: `${id}-id.pdf`, specimenFile: `${id}-specimen.pdf`, verifiedBy: 'AE.JREYES', verifiedAt: '2026-04-20T02:00:00.000Z' } });
   // Review 1.2: ZIP and province on every address; Draft clients have no credit limit until VP sign-off; internal records show who created them (the AE).
   const client = (c: Partial<Client> & Pick<Client, 'clientCode' | 'clientName' | 'status'>): Client => ({
     billingName: c.clientName, address1: 'Port Area', city: 'Manila', zipCode: '1018', province: 'Metro Manila (NCR)', country: 'PHILIPPINES', billingCycle: 'Weekly', aeAssigned: 'AE.JREYES',
@@ -136,7 +138,21 @@ export function buildSeed(): Db {
     contract('LTL-2026-0051', 'C-00201', 'LTL', 'A', 24, 850),
     contract('QLP-2026-0007', 'C-00215', 'QLP', 'Q', 5, 1200),
     contract('LTL-2026-0060', 'C-00230', 'LTL', 'A', 13, 950, 'Active', 305),
+    // Staff UI changes V1.4 (rows 44–46): ended contracts that carry the cash-bond examples. ABC's two match the Client Portal data
+    // (QLP-2025-0019 bond refunded RF-2026-0041; SPL-2025-0007 bond applied to its final bill); Visayas' two hold the Pending Admin and
+    // Approved — awaiting refund withdrawals.
+    contract('QLP-2025-0019', 'C-00123', 'QLP', 'Q', 6, 1200, 'Expired', 420),
+    contract('SPL-2025-0007', 'C-00123', 'SPL', 'Z', undefined, 1100, 'Terminated', 560),
+    contract('LTL-2025-0031', 'C-00201', 'LTL', 'A', 12, 850, 'Expired', 430),
+    contract('QLP-2025-0022', 'C-00201', 'QLP', 'Q', 6, 1200, 'Expired', 300),
   ];
+  {
+    const set = (no: string, o: Partial<Contract>, note: string, endAgo: number) => { const k = contracts.find((c) => c.contractNo === no)!; Object.assign(k, o); k.history?.push({ status: k.status, at: ago(endAgo), by: k.status === 'Terminated' ? 'SALESDIR' : 'system', note }); };
+    set('QLP-2025-0019', { unitQty: 4, cashDeposit: 15000 }, 'End date reached', 240);
+    set('SPL-2025-0007', { unitQty: 3, cashDeposit: 10000, lockInMonths: 0, termination: { workflowId: 'WF-CTT-1', reason: 'Moved all units to the long-term lease LTL-2026-0045', status: 'Approved', effectiveDate: manilaDay(ago(201)) } as Contract['termination'] }, 'Terminated early by agreement — no lock-in, no pre-termination fee', 201);
+    set('LTL-2025-0031', { unitQty: 4, cashDeposit: 10000 }, 'End date reached', 70);
+    set('QLP-2025-0022', { unitQty: 3, cashDeposit: 10000 }, 'End date reached', 120);
+  }
   // Staff review 1.2 (audit log): a contract whose expiry date passed before the demo data starts is already Expired, stamped by the
   // nightly job on the day after its expiry (not on the day the demo is first opened). seedAdmin writes the matching audit event.
   for (const ct of contracts) if (ct.status === 'Active' && ct.expiryDate && ct.expiryDate < manilaDay(now())) {
@@ -209,11 +225,18 @@ export function buildSeed(): Db {
     if (ret) {
       // Staff review 1.2: returned when its current Available period started, so the board's "days in status" agrees with the return date.
       const outAt = ago(75), inAt = ret.statusSince, base ={ chassisNo: ret.chassisNo, clientCode: 'C-00123', contractNo: 'LTL-2026-0045', trucker: 'XYZ Trucking', truckPlateNo: 'NAB 5590', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455',
-        generalAssessment: 'Roadworthy' as const, signature: DEMO_SIGNATURE, branchCode: 'MNL', encodedBy: 'BG.MNL', inspection: [] };
+        generalAssessment: 'Roadworthy' as const, signature: DEMO_SIGNATURE, branchCode: 'MNL', encodedBy: 'BG.MNL', inspection: [] as InspectionLine[] };
+      // Staff UI changes V1.4 (rows 16–17): the stored EIR keeps the itemized inspection of both legs (GAT-004 Gate Out checklist with
+      // tire branding / tread depth; GAT-005 Gate In parts status with a missing part and its charge), shown in the EIR detail and reprint.
+      const tires = ['Tire L1 outer', 'Tire L1 inner', 'Tire R1 outer', 'Tire R1 inner', 'Tire L2 outer', 'Tire L2 inner', 'Tire R2 outer', 'Tire R2 inner'];
+      const frame = ['Brake system', 'Landing legs', 'King pin', 'Twist locks', 'Lights & wiring', 'Mud flaps', 'Chassis frame'];
+      const outInspection: InspectionLine[] = [...tires.map((part, k) => ({ part, branding: k % 2 ? 'Bridgestone' : 'Yokohama', threadDepth: `${12 - (k % 3)} mm`, statusCode: 'OK', qty: 1, chargeable: 0 })), ...frame.map((part) => ({ part, statusCode: 'OK', qty: part === 'Twist locks' ? 4 : 1, chargeable: 0 }))];
+      const inInspection: InspectionLine[] = outInspection.map((l) => (l.part === 'Tire R2 outer' ? { ...l, threadDepth: '7 mm', statusCode: 'WRN' } : l.part === 'Mud flaps' ? { ...l, statusCode: 'MSG', chargeable: 850 } : l.part === 'Lights & wiring' ? { ...l, statusCode: 'DMG', chargeable: 0 } : l.part.startsWith('Tire') ? { ...l, threadDepth: `${Number.parseInt(l.threadDepth ?? '12', 10) - 2} mm` } : l));
       histEwas.push({ euNo: 'EU-TMP-R', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Mario Reyes', driverLicenseNo: 'N02-15-334455', truckPlateNo: 'NAB 5590', trucker: 'XYZ Trucking',
         units: [{ equipmentType: ret.chassisType, qty: 1, usedChassis: [ret.chassisNo] }], createdAt: addHours(outAt, -2), validUntil: addHours(outAt, 22), createdVia: 'Portal', status: 'Used', extensionCount: 0, createdBy: 'client@abclogistics.ph' });
-      gatePasses.push({ ...base, gatePassNo: 'GP-MNL-000880', direction: 'OUT', euNo: 'EU-TMP-R', truckOrcr: 'OR 4100190 / CR 5200290', actualEventAt: outAt, encodedAt: outAt, eirNo: 'EIR-MNL-000180', pairedGatePassNo: 'GP-MNL-000881' },
-        { ...base, gatePassNo: 'GP-MNL-000881', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, eirNo: 'EIR-MNL-000181', pairedGatePassNo: 'GP-MNL-000880', remarks: 'Returned in good condition' });
+      gatePasses.push({ ...base, gatePassNo: 'GP-MNL-000880', direction: 'OUT', euNo: 'EU-TMP-R', truckOrcr: 'OR 4100190 / CR 5200290', actualEventAt: outAt, encodedAt: outAt, eirNo: 'EIR-MNL-000180', pairedGatePassNo: 'GP-MNL-000881', inspection: outInspection },
+        { ...base, gatePassNo: 'GP-MNL-000881', direction: 'IN', actualEventAt: inAt, encodedAt: inAt, eirNo: 'EIR-MNL-000181', pairedGatePassNo: 'GP-MNL-000880', inspection: inInspection, flatTires: 0, vandalized: false,
+          remarks: 'Returned roadworthy — one mud flap missing (charged ₱850); left tail-light lens cracked (wear, not charged); R2 outer tire tread 7 mm' });
       // Staff review 1.1: the completed Out → In cycle also needs its EIR row, so the EIR list shows a returned example (both gate passes and dates).
       eirs.push({ eirNo: 'EIR-MNL-000180', gatePassOutNo: 'GP-MNL-000880', gatePassInNo: 'GP-MNL-000881', clientCode: 'C-00123', chassisNo: ret.chassisNo, chassisType: ret.chassisType, eirOutDate: outAt, eirInDate: inAt, depotCode: 'MNL', contractNo: 'LTL-2026-0045', reprintCount: 0 });
     }
@@ -463,6 +486,13 @@ export function buildSeed(): Db {
       { step: 2, label: 'Finance', roles: ['FINANCE_MANAGER'], decision: 'Pending', dueAt: ahead(1) },
       { step: 3, label: 'Accounting', roles: ['ACCOUNTING'], decision: 'Pending' },
       { step: 4, label: 'Admin', roles: ['SYS_ADMIN'], decision: 'Pending' }] }),
+    // Staff UI changes V1.4 (row 11, BR-03): completed hold-lift chains for the other two tiers — Tier 1 (Officer 1 alone) and
+    // Tier 3 (Officers 1, 2 and 3, each a separate signature; ₱500k–₱1M gap routed to Tier 3 by setting cnc.gap_policy).
+    { ...wf({ id: 'WF-HL-T1', matrixCode: 'HOLD_LIFT', title: 'Hold lift — Metro Container Lines (Tier 1)', subjectType: 'client', subjectId: 'C-00230', amount: 64800, requestedBy: 'CNC.MGR', requestedAt: ago(120), steps: [
+      { step: 1, label: 'Tier 1 — Officer 1', roles: ['CNC_OFFICER'], decision: 'Approved', decidedBy: 'CNC.OFF1', decidedAt: ago(119.8), comment: 'CNC.OFF1:CNC_OFFICER:₱40,000 paid; balance covered by a promise to pay within 7 days|' }] }), status: 'Approved' as const, currentStep: 1 },
+    { ...wf({ id: 'WF-HL-T3', matrixCode: 'HOLD_LIFT', title: 'Hold lift — ABC Logistics Inc. (Tier 3)', subjectType: 'client', subjectId: 'C-00123', amount: 560000, requestedBy: 'CNC.MGR', requestedAt: ago(260), steps: [
+      { step: 1, label: 'Tier 3 — Officers 1, 2 and 3', roles: ['CNC_OFFICER', 'EXEC_OFFICER', 'EXEC_OFFICER'], decision: 'Approved', decidedBy: 'EXEC.OFF3', decidedAt: ago(258.5),
+        comment: 'CNC.OFF1:CNC_OFFICER:Payment plan agreed — PDCs received|EXEC.OFF2:EXEC_OFFICER:Approved on the payment plan|EXEC.OFF3:EXEC_OFFICER:Approved — monitor weekly|' }] }), status: 'Approved' as const, currentStep: 1 },
     wf({ id: 'WF-HL-1', matrixCode: 'HOLD_LIFT', title: 'Hold lift — Pacific Movers Corp.', subjectType: 'client', subjectId: 'C-00188', amount: 308000, requestedBy: 'CNC.MGR', requestedAt: ago(3), steps: [
       { step: 1, label: 'Tier 2 — Officer 1 + Finance Manager', roles: ['CNC_OFFICER', 'FINANCE_MANAGER'], decision: 'Pending', dueAt: ago(1) }] }),
     // Gate (SCR-14/18 review): populated extension and late-encoding approval examples.
@@ -571,6 +601,90 @@ export function buildSeed(): Db {
       workflowId: 'WF-DM-37', createdAt: ago(13), createdBy: 'TREAS', source: 'Auto', evidence: ['RCBC-return-slip.pdf'], approvalChain: ['Finance Manager'] },
   ];
 
+  // Staff UI changes V1.4 (rows 44–46): the cash-bond withdrawal approval chains (C&C → Finance → Accounting → Admin).
+  {
+    const step = (n: number, label: string, role: RoleCode, by: string, at: string | undefined, c: string) => ({ step: n, label, roles: [role], decision: (at ? 'Approved' : 'Pending') as 'Approved' | 'Pending', decidedBy: at ? by : undefined, decidedAt: at, comment: at ? `${by}:${role}:${c}|` : undefined });
+    const chain = (start: number, done: number) => [
+      step(1, 'Credit & Collection', 'CNC_OFFICER', 'CNC.OFF1', done > 0 ? ago(start - 1) : undefined, 'Balances checked'), step(2, 'Finance', 'FINANCE_MANAGER', 'FINMGR', done > 1 ? ago(start - 2) : undefined, 'Endorsed'),
+      step(3, 'Accounting', 'ACCOUNTING', 'ACCTG', done > 2 ? ago(start - 3) : undefined, 'Refundable amount verified against the ledger'), step(4, 'Admin', 'SYS_ADMIN', 'ADMIN', done > 3 ? ago(start - 4) : undefined, 'Approved')];
+    const w = (id: string, bondId: string, client: string, amount: number, requestedAt: string, steps: ReturnType<typeof chain>, status: 'Pending' | 'Approved') => ({ id, matrixCode: 'CASH_BOND_WITHDRAWAL', title: `Cash bond withdrawal — ${client}`, subjectType: 'cashbond', subjectId: bondId, amount,
+      requestedBy: 'AE.KONG', requestedAt, status, currentStep: steps.filter((s) => s.decision === 'Approved').length, steps: steps.map((s, i) => (i === steps.filter((x) => x.decision === 'Approved').length && status === 'Pending' ? { ...s, dueAt: ahead(1) } : s)) });
+    workflows.push(
+      { ...w('WF-CBW-6', 'CB-6', 'ABC Logistics Inc.', 15000, ago(238), chain(238, 4), 'Approved'), requestedBy: 'AE.JREYES' },
+      w('WF-CBW-8', 'CB-8', 'Visayas Freight Services', 8880, ago(6), chain(6, 3), 'Pending'), // Pending Admin
+      w('WF-CBW-9', 'CB-9', 'Visayas Freight Services', 10000, ago(15), chain(15, 4), 'Approved')); // Approved — awaiting refund
+  }
+  // Staff UI changes V1.4 (row 34, RM-002): a chargeable job order fully closed — JO-MNL-000440 on DW-MNL-1005 (Visayas). Repairs closed
+  // per system with before / after photos, Closed by R&M, then "Closed by EIR Out" when the unit left on GP-MNL-000902 (EIR-MNL-000202).
+  // DM-000030 bills the final parts + labor (+ input VAT) and was settled from the e-wallet; the top-up that funded it nets to zero, so the
+  // Visayas wallet balance (₱45,000) is unchanged.
+  const extraJos: JobOrder[] = [];
+  const extraEwt: Db['ewalletTxns'] = [];
+  {
+    const gp5 = gatePasses.find((g) => g.direction === 'OUT' && g.chassisNo === 'DW-MNL-1005');
+    if (gp5 && gp5.clientCode === 'C-00201') {
+      const created = ago(54), closed = ago(44), bom = [{ partCode: 'BRK-PAD', description: 'Brake lining set', qty: 1, unitCost: 3800 }, { partCode: 'ELC-LAMP', description: 'Tail lamp assembly', qty: 1, unitCost: 950 }];
+      const labor = [{ worker: 'Laborer A', hours: 5, rate: 95, date: manilaDay(ago(45)), shift: 'Morning' as const }];
+      const cost = 3800 + 950 + 475, inputTax = Math.round(cost * 0.12 * 100) / 100, amount = Math.round((cost + inputTax) * 100) / 100;
+      extraJos.push({ joNo: 'JO-MNL-000440', chassisNo: 'DW-MNL-1005', branchCode: 'MNL', source: 'Gate In', sourceRef: 'Gate-in inspection on return (worn brake lining, broken tail lamp)', categories: ['Brakes', 'Electrical'],
+        notes: 'Brake lining worn below limit and left tail lamp broken on return — client damage, chargeable.', workers: ['Laborer A'], status: 'Closed by EIR Out', isMajor: false, chargeable: true, chargeClientCode: 'C-00201',
+        priority: 'Normal', estimatedCost: 5000, photos: ['jo440-brake-before.jpg'], afterPhotos: ['jo440-brake-after.jpg', 'jo440-lamp-after.jpg'], bom, labor,
+        systemsClosed: [{ system: 'Brakes', at: addHours(closed, -3), by: 'BG.MNL' }, { system: 'Electrical', at: addHours(closed, -1), by: 'BG.MNL' }],
+        createdAt: created, createdBy: 'BG.MNL', approvedBy: 'BG.MNL', confirmedBy: 'DYM.MNL', closedAt: closed, eirOut: { gatePassNo: gp5.gatePassNo, eirNo: gp5.eirNo, at: gp5.actualEventAt },
+        history: [{ at: created, by: 'BG.MNL', status: 'Draft', note: 'Created' }, { at: addHours(created, 2), by: 'BG.MNL', status: 'Approved' }, { at: addHours(created, 5), by: 'DYM.MNL', status: 'Confirmed' },
+          { at: ago(46), by: 'BG.MNL', status: 'Ongoing', note: 'Work started' }, { at: addHours(closed, -3), by: 'BG.MNL', status: 'Ongoing', note: 'Brakes repair closed' }, { at: addHours(closed, -1), by: 'BG.MNL', status: 'Ongoing', note: 'Electrical repair closed' },
+          { at: closed, by: 'BG.MNL', status: 'Closed by R&M', note: 'After-repair photos attached' }, { at: gp5.actualEventAt, by: gp5.encodedBy, status: 'Closed by EIR Out', note: `Departed on ${gp5.gatePassNo} · ${gp5.eirNo}` }] });
+      billingMemos.push({ memoNo: 'DM-000030', type: 'Debit', clientCode: 'C-00201', referenceType: 'Job Order', referenceId: 'JO-MNL-000440', joNo: 'JO-MNL-000440', amount,
+        reason: `Chargeable repair JO-MNL-000440 (closed) — parts ₱4,750.00 + labor ₱475.00 + 12% input VAT ₱${inputTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}; deducted from the e-wallet`, category: 'Repair cost', status: 'Posted',
+        createdAt: addHours(closed, 4), createdBy: 'ACCTG', source: 'Manual', evidence: ['JO-MNL-000440-accomplishment-report.pdf'], breakdown: { labor: 475, parts: 4750, travel: 0, service: 0, inputTax }, approvalChain: ['Finance Manager'], vatTreatment: 'VAT-exclusive' });
+      extraEwt.push({ id: 'EWT-7A', clientCode: 'C-00201', at: ago(47), type: 'Replenishment', amount, balanceAfter: 45000 + amount, referenceType: 'Top-up', referenceId: 'OR-CEB-00000041', receiptNo: 'OR-CEB-00000041', treasuryRef: 'TRS-2026-0163', category: 'Top-up', by: 'ACCTG', reason: 'Top-up to cover the chargeable repair JO-MNL-000440' },
+        { id: 'EWT-7B', clientCode: 'C-00201', at: addHours(closed, 5), type: 'Deduction', amount: -amount, balanceAfter: 45000, referenceType: 'Debit Memo', referenceId: 'DM-000030', category: 'Repair', by: 'system' });
+    }
+  }
+  // Staff UI changes V1.4 (row 54): a completed PARK & REPAIR example (PF-3). Its job order JO-MNL-000505 is closed with actual parts + labor;
+  // the park-out bill carries handling, repair, parking and VAT, and DM-000042 matches it to the centavo.
+  const pf3Jo: JobOrder = { joNo: 'JO-MNL-000505', chassisNo: 'VFS-TRL-0311', branchCode: 'MNL', source: 'Spot Repair', sourceRef: 'PF-3', categories: ['Brakes', 'Electrical'],
+    notes: 'Park & Fix repair for client-owned trailer VFS-TRL-0311 (Visayas Freight Services). Chargeable to client. Scope: replace brake lining set and one tail lamp.', workers: ['Laborer B'], status: 'Closed by R&M', isMajor: false,
+    chargeable: true, chargeClientCode: 'C-00201', estimatedCost: 5000, photos: ['pf3-brake-before.jpg'], afterPhotos: ['pf3-brake-after.jpg'], priority: 'Normal',
+    bom: [{ partCode: 'BRK-PAD', description: 'Brake lining set', qty: 1, unitCost: 3800 }, { partCode: 'ELC-LAMP', description: 'Tail lamp assembly', qty: 1, unitCost: 950 }],
+    labor: [{ worker: 'Laborer B', hours: 4, rate: 95, date: manilaDay(ago(1)), shift: 'Afternoon' }],
+    systemsClosed: [{ system: 'Brakes', at: ago(0.9), by: 'BG.MNL' }, { system: 'Electrical', at: ago(0.85), by: 'BG.MNL' }],
+    createdAt: ago(3), createdBy: 'BG.MNL', approvedBy: 'BG.MNL', confirmedBy: 'DYM.MNL', closedAt: ago(0.8),
+    history: [{ at: ago(3), by: 'BG.MNL', status: 'Draft', note: 'Created from Park & Fix PF-3' }, { at: ago(2.9), by: 'BG.MNL', status: 'Approved' }, { at: ago(2.8), by: 'DYM.MNL', status: 'Confirmed' }, { at: ago(1.2), by: 'BG.MNL', status: 'Ongoing', note: 'Work started' }, { at: ago(0.8), by: 'BG.MNL', status: 'Closed by R&M', note: 'After-repair photo attached' }] };
+  extraJos.push(pf3Jo);
+  const pf3Charges = { handling: 500, repair: 5130, park: 1050, net: 5964.29, vat: 715.71, total: 6680, interimBilled: 0, due: 6680, vatBasis: 'inclusive' as const, repairSource: 'Actual cost of JO-MNL-000505 (parts + labor, Closed by R&M)' };
+  billingMemos.push({ memoNo: 'DM-000042', type: 'Debit', clientCode: 'C-00201', referenceType: 'Park & Fix', referenceId: 'PF-3', joNo: 'JO-MNL-000505', amount: 6680,
+    reason: 'Park & Fix VFS-TRL-0311 (Park & Repair) — handling ₱500.00 + repair ₱5,130.00 + park 3 day(s) × ₱350 = ₱1,050.00; VAT inclusive ₱715.71; total ₱6,680.00 (DBL-ALO-005)', status: 'Posted', createdAt: ago(0.3) });
+  // Staff UI changes V1.4 (row 19): a FULLY APPROVED late-encoding Credit Memo example (LE-00097) — Visayas unit DW-LAG-1022, gate pass
+  // encoded 10 days late. DYM then Treasury approved CM-000005; the held line was released to INV-CEB-00000302, which the client paid
+  // (OR-CEB-00000301), so AR / aging totals do not change. The gate pass and the unit's status date now use the actual gate-out.
+  {
+    const lgp = gatePasses.find((g) => g.direction === 'OUT' && g.chassisNo === 'DW-LAG-1022');
+    const lch = chassis.find((c) => c.chassisNo === 'DW-LAG-1022');
+    const eqIdx = equipmentTypes.findIndex((e) => e.code === lch?.chassisType);
+    if (lgp && lch && eqIdx >= 0 && lgp.clientCode === 'C-00201') {
+      const corrected = addDays(lgp.encodedAt, -10), recorded = addHours(lgp.encodedAt, 1 / 3), dymAt = addHours(recorded, 19), trsAt = addHours(recorded, 41);
+      lgp.actualEventAt = corrected; lch.statusSince = corrected;
+      const ev = inv('INV-CEB-00000302', 'C-00201', lgp.contractNo, Math.max(1, Math.round((Date.now() - new Date(trsAt).getTime()) / 86_400_000) - 2), [[eqIdx, 10]], 0, 'CEB');
+      const ln = ev.lines[0];
+      Object.assign(ln, { description: `Chassis lease — ${equipmentTypes[eqIdx].name} · late-encoded days released by CM-000005 (LE-00097)`, chassisNo: lch.chassisNo, from: corrected, to: addDays(corrected, 9), days: 10, lateDays: 10, heldMemoNo: 'CM-000005', recalculated: true, gatePassNo: lgp.gatePassNo, ewaNo: lgp.euNo });
+      ev.amountPaid = ev.total;
+      (ev.history ??= []).push({ at: trsAt, by: 'system', action: 'Held lines released', note: 'CM-000005 approved (BR-05)' });
+      invoices.push(ev);
+      billingReceipts.push(billRc({ receiptNo: 'PR-CEB-00000300', orNo: 'OR-CEB-00000301', type: 'OR', status: 'OR Issued', clientCode: 'C-00201', amount: ev.total, method: 'Bank Transfer', bank: 'Metrobank', reference: 'MBTC-TRF-87011',
+        date: addDays(ev.issuedAt, 3).slice(0, 10), createdAt: addDays(ev.issuedAt, 3), depositStatus: 'Cleared', applications: [{ invoiceNo: ev.invoiceNo, amount: ev.total }] }));
+      workflows.push({ id: 'WF-LE-0', matrixCode: 'LATE_ENCODING_CM', title: `Late encoding 10 days — ${lgp.gatePassNo}`, subjectType: 'gatepass', subjectId: lgp.gatePassNo, requestedBy: 'BG.MNL', requestedAt: recorded, branchCode: lgp.branchCode, status: 'Approved', currentStep: 2, steps: [
+        { step: 1, label: 'Deputy Yard Manager', roles: ['DYM'], decision: 'Approved', decidedBy: 'DYM.MNL', decidedAt: dymAt, dueAt: addHours(recorded, 48), comment: 'DYM.MNL:DYM:Paper gate pass and guard logbook verified|' },
+        { step: 2, label: 'Treasury', roles: ['TREASURY'], decision: 'Approved', decidedBy: 'TREAS', decidedAt: trsAt, dueAt: addHours(dymAt, 48), comment: 'TREAS:TREASURY:Billing correction accepted|' }] });
+      billingMemos.push({ memoNo: 'CM-000005', type: 'Credit', clientCode: 'C-00201', referenceInvoiceNo: ev.invoiceNo, referenceType: 'Late Encoding', referenceId: 'LE-00097', amount: ln.amount,
+        reason: `Late encoding 10 days (LE-00097) — held line ${lch.chassisNo}: 10 days × ₱${ln.rate?.toLocaleString('en-PH', { minimumFractionDigits: 2 })} = ₱${ln.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}, released to ${ev.invoiceNo}; unit billed from the actual gate-out date`,
+        category: 'Late-encoding correction', status: 'Posted', workflowId: 'WF-LE-0', createdAt: recorded, createdBy: 'BG.MNL', source: 'Auto', evidence: ['paper-gate-pass-LAG-scan.pdf'], approvalChain: ['Deputy Yard Manager', 'Treasury'], vatTreatment: 'VAT-exclusive' });
+      lateEncodings.unshift({ id: 'LE-00097', gatePassNo: lgp.gatePassNo, originalDate: lgp.encodedAt, correctedDate: corrected, daysLate: 10, reason: 'Gate tablet replaced — paper gate pass encoded once the new tablet was set up',
+        path: 'CREDIT_MEMO', status: 'Approved', workflowId: 'WF-LE-0', createdAt: recorded, createdBy: 'BG.MNL', attachment: 'paper-gate-pass-LAG-scan.pdf', memoNo: 'CM-000005', approvedAt: trsAt,
+        releasedLines: [{ invoiceNo: ev.invoiceNo, lineId: ln.id, description: ln.description, days: 10, amount: ln.amount }] });
+    }
+  }
+
   const rule = (id: string, eventType: string, description: string, recipientRoles: RoleCode[], source: string, o: Partial<NotificationRule> = {}): NotificationRule => ({
     id, eventType, description, recipientRoles, namedRecipients: [], includeClient: false, includeAe: false, channels: ['Email', 'SMS', 'In-App'], mode: 'One-time', active: true, source, ...o,
   });
@@ -646,7 +760,7 @@ export function buildSeed(): Db {
     drafts.forEach(({ jo, createdAt }) => { const no = createdAt < ago(14) ? older++ : newer++; repairJos.push({ joNo: `JO-${jo.branchCode}-${String(no).padStart(6, '0')}`, ...jo }); });
   }
 
-  return {
+  const seedOut: Db = {
     version: 4,
     branches, equipmentTypes, users, clients,
     accreditations: [
@@ -661,6 +775,17 @@ export function buildSeed(): Db {
     ],
     contracts,
     cashBonds: [
+      // Staff UI changes V1.4 (rows 44–46): one bond at each final withdrawal stage, on ended contracts.
+      { id: 'CB-6', clientCode: 'C-00123', contractNo: 'QLP-2025-0019', amount: 15000, dateReceived: ago(422).slice(0, 10), receiptRef: 'OR-MNL-00000196', status: 'Refunded', paymentMethod: 'Bank transfer', receivedBy: 'TREAS', branchCode: 'MNL', bondType: 'New', recordedAt: ago(422),
+        notes: 'Refunded in full by bank transfer after the contract expired — all units returned, nothing owed (BR-14).',
+        withdrawals: [{ id: 'CBW-6', amount: 15000, reason: 'Contract expired; all units returned and nothing owed', refundable: 15000, workflowId: 'WF-CBW-6', status: 'Refunded', requestedAt: ago(238),
+          refund: { method: 'Bank transfer', date: ago(226).slice(0, 10), reference: 'RF-2026-0041', by: 'ACCTG' } }] },
+      { id: 'CB-7', clientCode: 'C-00123', contractNo: 'SPL-2025-0007', amount: 10000, dateReceived: ago(562).slice(0, 10), receiptRef: 'OR-MNL-00000142', status: 'Applied', paymentMethod: 'Check', receivedBy: 'TREAS', branchCode: 'MNL', bondType: 'New', recordedAt: ago(562), withdrawals: [],
+        notes: 'Applied in full to the final Spot List bill INV-MNL-00000987 at termination (BR-14: what is owed is deducted first); nothing left to refund.' },
+      { id: 'CB-8', clientCode: 'C-00201', contractNo: 'LTL-2025-0031', amount: 10000, dateReceived: ago(432).slice(0, 10), receiptRef: 'OR-CEB-00000012', status: 'Withdrawal Pending', paymentMethod: 'Bank transfer', bankRef: 'MBTC-TRF-31007', receivedBy: 'ACCTG', branchCode: 'CEB', bondType: 'New', recordedAt: ago(432),
+        withdrawals: [{ id: 'CBW-8', amount: 8880, reason: 'Contract ended — refund of the bond less the unpaid balance (₱1,120)', refundable: 8880, workflowId: 'WF-CBW-8', status: 'Pending', requestedAt: ago(6) }] },
+      { id: 'CB-9', clientCode: 'C-00201', contractNo: 'QLP-2025-0022', amount: 10000, dateReceived: ago(302).slice(0, 10), receiptRef: 'OR-CEB-00000027', status: 'Withdrawal Pending', paymentMethod: 'Check', checkNo: '0045519', checkBank: 'Metrobank', checkDate: ago(302).slice(0, 10), receivedBy: 'ACCTG', branchCode: 'CEB', bondType: 'New', recordedAt: ago(302),
+        withdrawals: [{ id: 'CBW-9', amount: 10000, reason: 'Contract ended — all units returned, nothing owed at the time of request', refundable: 10000, workflowId: 'WF-CBW-9', status: 'Approved — awaiting refund', requestedAt: ago(15) }] },
       // Review 1.2: every bond carries its payment method, who received it, its branch and when it was recorded.
       { id: 'CB-1', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', amount: 20000, dateReceived: ago(205).slice(0, 10), receiptRef: 'OR-MNL-00000301', status: 'Held', withdrawals: [],
         paymentMethod: 'Cash', receivedBy: 'ACCTG', branchCode: 'MNL', bondType: 'New', recordedAt: ago(205), receiptFile: 'OR-MNL-00000301.pdf', notes: 'Cash deposit for LTL-2026-0045, paid at signing.' },
@@ -696,7 +821,13 @@ export function buildSeed(): Db {
         notes: 'Retired after hydraulic pump failure; disposal requested.', disposal: { action: 'Dispose', reason: 'Beyond economic repair — sell as scrap', workflowId: 'WF-AST-1', status: 'Pending Approval', requestedAt: ago(1) } },
       { assetId: 'AST-ST-006', category: 'Stockroom Tool', description: 'Platform scale 300 kg', branchCode: 'CEB', location: 'Cebu stockroom', status: 'Disposed', qty: 1, uom: 'unit', make: 'Generic', model: 'TCS-300', condition: 'Unserviceable', qrCode: 'QR-AST-ST-006', acquisitionDate: ago(2400).slice(0, 10),
         notes: 'Disposed — sold as scrap (approved).', disposal: { action: 'Dispose', reason: 'Load cell failed; replaced by new scale', workflowId: 'WF-00003', status: 'Approved', requestedAt: ago(40) } },
-      { assetId: 'AST-ST-007', category: 'Stockroom Tool', description: 'Socket wrench set', branchCode: 'MNL', location: 'Manila stockroom — Shelf C2', status: 'In-Use', assignedTo: 'WH.MNL', qty: 4, uom: 'set', make: 'Stanley', model: 'STMT74181', condition: 'Good', qrCode: 'QR-AST-ST-007', acquisitionDate: ago(400).slice(0, 10) },
+      { assetId: 'AST-ST-007', category: 'Stockroom Tool', description: 'Socket wrench set', branchCode: 'MNL', location: 'Manila stockroom — Shelf C2', status: 'In-Use', assignedTo: 'WH.MNL', qty: 4, uom: 'set', make: 'Stanley', model: 'STMT74181', condition: 'Good', qrCode: 'QR-AST-ST-007', acquisitionDate: ago(400).slice(0, 10),
+        // V1.4 row 50: issue / return history — 4 sets held by the stockroom custodian; 2 out now (1 with the technician, 1 with R&M), 2 on the shelf.
+        issues: [
+          { id: 'TI-0003', issuedTo: 'Dept: Repair & Maintenance', qty: 1, issuedAt: ago(5), issuedBy: 'WH.MNL', purpose: 'JO-NVL-000498 lamp replacement', conditionOut: 'Good', dueBack: manilaDay(ahead(2)), returns: [] },
+          { id: 'TI-0002', issuedTo: 'TECH.MNL', qty: 2, issuedAt: ago(20), issuedBy: 'WH.MNL', purpose: 'Yard brake-lining jobs (two crews)', conditionOut: 'Good', returns: [{ qty: 1, at: ago(10), by: 'WH.MNL', condition: 'Good', notes: 'Second crew finished' }] },
+          { id: 'TI-0001', issuedTo: 'BG.MNL', qty: 1, issuedAt: ago(30), issuedBy: 'WH.MNL', purpose: 'Spot repair at the gate', conditionOut: 'Good', returns: [{ qty: 1, at: ago(28), by: 'WH.MNL', condition: 'Fair', notes: 'One 14 mm socket worn — still usable' }] },
+        ] },
     ],
     ewas: [
       { euNo: 'EU-000781', clientCode: 'C-00123', contractNo: 'LTL-2026-0045', branchCode: 'MNL', driverName: 'Juan Dela Cruz', driverLicenseNo: 'N01-23-456789', truckPlateNo: 'NAB 5678', trucker: 'XYZ Trucking',
@@ -716,7 +847,7 @@ export function buildSeed(): Db {
       ...histEwas,
     ],
     gatePasses, eirs, lateEncodings,
-    jobOrders: [
+    jobOrders: [...extraJos,
       // Review 1.2: the JO prefix is the chassis home branch (as the system issues it) — these two Navotas units now read JO-NVL-… (were JO-MNL-…).
       { joNo: 'JO-NVL-000512', chassisNo: breakdown.chassisNo, branchCode: breakdown.branchCode, source: 'Gate In', sourceRef: 'Gate-in inspection (EIR on return)', categories: ['Tires', 'Brakes'], notes: 'Two flat tires, worn brake lining found at gate-in inspection.', workers: ['Laborer A', 'Laborer B'],
         status: 'Draft', isMajor: false, chargeable: true, chargeClientCode: 'C-00123', estimatedCost: 11900, priority: 'Normal', targetDate: manilaDay(ahead(3)), photos: ['jo512-tires.jpg', 'jo512-brake-lining.jpg'],
@@ -766,7 +897,11 @@ export function buildSeed(): Db {
     parts, stock, stockTxns,
     vendors,
     prs: [{ prNo: 'PR-000210', department: 'Operations', requestedBy: 'BG.MNL', justification: 'Replenish tires for rescue and repair stock (low stock).', entityCode: 'DBL', lines: [{ partCode: 'TIR-1100', description: 'Tire 11R22.5 radial', qty: 20, estUnitCost: 14500, uom: 'pc', standardCost: 14500, supplierId: 'V-001' }], status: 'For Approval', workflowId: 'WF-PR-1', createdAt: ago(2),
-      supplierId: 'V-001', neededBy: ahead(10).slice(0, 10), priority: 'Urgent', deliveryWarehouse: 'WH-MNL', stockRef: 'Low stock · TIR-1100 @ WH-MNL', attachments: ['quote-tirepro-2026-10.pdf'] }],
+      supplierId: 'V-001', neededBy: ahead(10).slice(0, 10), priority: 'Urgent', deliveryWarehouse: 'WH-MNL', stockRef: 'Low stock · TIR-1100 @ WH-MNL', attachments: ['quote-tirepro-2026-10.pdf'] },
+      // Staff UI changes V1.4 (row 10): a PR already at the FINAL step (above the BR-09 threshold) — CEO and CHRO each sign separately; both are pending.
+      { prNo: 'PR-000209', department: 'Repair & Maintenance', requestedBy: 'DEPTHEAD', justification: 'Brake drums and leaf springs for the Q1 preventive maintenance plan (all branches).', entityCode: 'DBL',
+        lines: [{ partCode: 'BRK-DRUM', description: 'Brake drum', qty: 25, estUnitCost: 7200, uom: 'pc', standardCost: 7200, supplierId: 'V-002' }, { partCode: 'SUS-LEAF', description: 'Leaf spring assembly', qty: 14, estUnitCost: 9800, uom: 'pc', standardCost: 9800, supplierId: 'V-002' }],
+        status: 'For Approval', workflowId: 'WF-PR-0', createdAt: ago(6), supplierId: 'V-002', neededBy: ahead(21).slice(0, 10), priority: 'Normal', deliveryWarehouse: 'WH-MNL', attachments: ['quote-axlebrake-2026-11.pdf'] }],
     pos: [{ poNo: 'PO-000155', prNo: 'PR-000190', vendorId: 'V-002', terms: '15 days', deliveryDate: ahead(5).slice(0, 10), entityCode: 'DBL', status: 'Issued', createdAt: ago(10), lines: [{ partCode: 'BRK-PAD', description: 'Brake lining set', qty: 30, unitPrice: 3700, qtyReceived: 0 }, { partCode: 'BRK-DRUM', description: 'Brake drum', qty: 10, unitPrice: 7000, qtyReceived: 0 }] },
       // One open PO for the demo vendor (vendor@tirepro.ph) so the portal upload-invoice dialog can be shown.
       { poNo: 'PO-000154', prNo: 'PR-000189', vendorId: 'V-001', terms: '30 days', deliveryDate: ahead(7).slice(0, 10), entityCode: 'DBL', status: 'Issued', createdAt: ago(6), lines: [{ partCode: 'TIR-1100', description: 'Tire 11R22.5 radial', qty: 8, unitPrice: 14500, qtyReceived: 0 }] },
@@ -786,14 +921,32 @@ export function buildSeed(): Db {
         history: [{ at: ago(1.4), by: 'ACCTG', action: 'PR recorded', note: 'Initial e-wallet funding' }, { at: ago(1), by: 'TREAS', action: 'Clearance confirmed — OR-BTG-00000454 issued' }] }],
     memos: [...billingMemos, { memoNo: 'DM-000021', type: 'Debit', clientCode: 'C-00123', referenceType: 'Rescue', referenceId: 'RSC-000020', amount: 18048.8, reason: 'Rescue charge (BR-11)', status: 'Posted', createdAt: ago(60), vatTreatment: 'VAT-inclusive', settlement: 'E-wallet' }, { memoNo: 'DM-000039', type: 'Debit', clientCode: 'C-00123', referenceType: 'Park & Fix', referenceId: 'PF-2', amount: 2800, reason: 'Park & Fix ABC-CH-2210 — 8 day(s) × ₱350 (DBL-ALO-005)', status: 'Posted', createdAt: ago(12), vatTreatment: 'VAT-exclusive', settlement: 'Next invoice' }, { memoNo: 'DM-000040', type: 'Debit', clientCode: 'C-00230', referenceType: 'Rescue', referenceId: 'RSC-000038', amount: 7601.44, reason: 'Rescue charge (BR-11)', status: 'Posted', createdAt: ago(6), vatTreatment: 'VAT-inclusive', settlement: 'E-wallet' }],
     // Review 1.1: placed the day the invoice passed 30 days overdue (31 days at hold; the list shows today's age separately).
-    holdEvents: [{ id: 'HE-1', clientCode: 'C-00188', type: 'Auto Hold', at: ago(14), by: 'system', outstanding: 308000, daysOverdue: 31, invoiceNo: 'INV-MNL-00001050', reason: 'Invoice INV-MNL-00001050 unpaid 31 days past due at hold (BR-02)' }],
+    holdEvents: [{ id: 'HE-1', clientCode: 'C-00188', type: 'Auto Hold', at: ago(14), by: 'system', outstanding: 308000, daysOverdue: 31, invoiceNo: 'INV-MNL-00001050', reason: 'Invoice INV-MNL-00001050 unpaid 31 days past due at hold (BR-02)' },
+      // V1.4 row 11: the holds lifted by the Tier 1 and Tier 3 examples (each reactivation names its approvers and workflow).
+      { id: 'HE-T1A', clientCode: 'C-00230', type: 'Auto Hold', at: ago(122), by: 'system', outstanding: 64800, daysOverdue: 31, reason: 'Balance unpaid 31 days past due at hold (BR-02)' },
+      { id: 'HE-T1B', clientCode: 'C-00230', type: 'Reactivated', at: ago(119.8), by: 'CNC.OFF1', outstanding: 64800, reason: 'Hold lift approved — Tier 1 — Officer 1', approvedBy: 'CNC.OFF1', workflowId: 'WF-HL-T1' },
+      { id: 'HE-T3A', clientCode: 'C-00123', type: 'Auto Hold', at: ago(262), by: 'system', outstanding: 560000, daysOverdue: 33, reason: 'Balance unpaid 33 days past due at hold (BR-02)' },
+      { id: 'HE-T3B', clientCode: 'C-00123', type: 'Reactivated', at: ago(258.5), by: 'EXEC.OFF3', outstanding: 560000, reason: 'Hold lift approved — Tier 3 — Officers 1, 2 and 3', approvedBy: 'CNC.OFF1, EXEC.OFF2, EXEC.OFF3', workflowId: 'WF-HL-T3' }],
     collections: [
       { clientCode: 'C-00188', stage: '2nd Reminder', stageChangedAt: ago(4), nextActionDue: ahead(6).slice(0, 10), acknowledgedAt: ago(13), soaSends: [{ id: 'SS-1', soaNo: 'SOA-2026-00301', at: ago(14), by: 'CNC.OFF1', channel: 'Email', to: 'ap@pacificmovers.ph' }],
         // Staff review 1.2: collection owner, last contact and a promise to pay.
         ownerUserId: 'CNC.OFF1', lastContactAt: ago(3), promiseToPay: { date: manilaDay(ahead(5)), amount: 106400, recordedAt: ago(3), by: 'CNC.OFF1', notes: 'AP head promised to settle INV-MNL-00001068 first, then a plan for INV-MNL-00001050' },
         actions: [{ at: ago(3), action: `Client contact (Phone) — promise to pay ₱106,400 by ${manilaDay(ahead(5))}`, by: 'CNC.OFF1', notes: 'AP head promised to settle INV-MNL-00001068 first' }, { at: ago(4), action: '2nd Reminder', by: 'system' }, { at: ago(9), action: '1st Reminder', by: 'system' }, { at: ago(13), action: 'SOA acknowledged by client', by: 'CNC.OFF1' }, { at: ago(14), action: 'SOA Sent', by: 'CNC.OFF1', notes: 'SOA-2026-00301 by email' }] },
-      { clientCode: 'C-00215', stage: 'SOA Sent', stageChangedAt: ago(7), nextActionDue: ago(2).slice(0, 10), soaSends: [{ id: 'SS-2', soaNo: 'SOA-2026-00310', at: ago(7), by: 'CNC.OFF1', channel: 'Courier', to: 'Southern Haulers Co., Batangas City', trackingNo: 'LBC 7781-2201' }],
-        ownerUserId: 'CNC.OFF1', actions: [{ at: ago(7), action: 'SOA Sent', by: 'CNC.OFF1', notes: 'SOA-2026-00310 by courier' }] },
+      // V1.4 row 48: the courier SOA carries the courier, the named recipient and the delivery result with proof of delivery.
+      { clientCode: 'C-00215', stage: 'SOA Sent', stageChangedAt: ago(7), nextActionDue: ago(2).slice(0, 10), soaSends: [{ id: 'SS-2', soaNo: 'SOA-2026-00310', at: ago(7), by: 'CNC.OFF1', channel: 'Courier', to: 'Southern Haulers Co., Batangas City', trackingNo: 'LBC 7781-2201',
+        courier: 'LBC Express', recipientName: 'Accounts Payable — Southern Haulers Co.', delivery: { status: 'Delivered', at: ago(5).slice(0, 10), receivedBy: 'R. Mendoza (AP clerk)', podFile: 'LBC-7781-2201-POD.jpg', recordedBy: 'CNC.OFF1' } }],
+        ownerUserId: 'CNC.OFF1', actions: [{ at: ago(4.5), action: 'SOA SOA-2026-00310 — delivered (received by R. Mendoza (AP clerk))', by: 'CNC.OFF1', notes: 'LBC proof of delivery attached' }, { at: ago(7), action: 'SOA Sent', by: 'CNC.OFF1', notes: 'SOA-2026-00310 by courier' }] },
+      // V1.4 row 49 (CNC-006): a client that reached the last step — the Legal department's final demand, approved, issued and delivered.
+      { clientCode: 'C-00099', stage: 'Demand Letter', stageChangedAt: ago(96), acknowledgedAt: ago(150), ownerUserId: 'CNC.MGR',
+        soaSends: [{ id: 'SS-0', soaNo: 'SOA-2026-00211', at: ago(152), by: 'CNC.OFF1', channel: 'Courier', to: 'Defunct Transport Ltd., Pasig City', trackingNo: 'LBC 6610-0102', courier: 'LBC Express', recipientName: 'Treasurer — Defunct Transport Ltd.',
+          delivery: { status: 'Delivered', at: ago(150).slice(0, 10), receivedBy: 'M. Ramos (Treasurer)', podFile: 'LBC-6610-0102-POD.jpg', recordedBy: 'CNC.OFF1' } }],
+        demandLetter: { letterRef: 'DL-2026-0007', legalOwner: 'Atty. R. Villanueva — Legal Department', approvedBy: 'CNC.MGR', approvedAt: ago(97), issuedAt: ago(96), file: 'DL-2026-0007-final-demand-signed.pdf', amount: 186400,
+          recipient: 'Defunct Transport Ltd., Pasig City (Attn: President)', channel: 'Courier', courier: 'LBC Express', trackingNo: 'LBC 6610-0423',
+          delivery: { status: 'Delivered', at: ago(94).slice(0, 10), receivedBy: 'Security guard on duty (refused to sign — photo on file)', podFile: 'LBC-6610-0423-POD.jpg', recordedBy: 'CNC.MGR', notes: 'Account referred to Legal; client blacklisted after the 5-day demand period' } },
+        actions: [{ at: ago(90), action: 'Client blacklisted — referred to Legal after the demand period lapsed', by: 'CNC.MGR' },
+          { at: ago(93.5), action: 'Demand letter DL-2026-0007 — delivered (received by Security guard on duty)', by: 'CNC.MGR', notes: 'LBC proof of delivery attached' },
+          { at: ago(96), action: 'Demand Letter', by: 'CNC.MGR', notes: 'Demand letter approved — issued by the Legal department (DL-2026-0007, ₱186,400)', letter: 'Final demand for ₱186,400 within five (5) days of receipt.' },
+          { at: ago(120), action: '2nd Reminder', by: 'system' }, { at: ago(130), action: '1st Reminder', by: 'system' }, { at: ago(150), action: 'SOA acknowledged by client', by: 'CNC.OFF1' }, { at: ago(152), action: 'SOA Sent', by: 'CNC.OFF1', notes: 'SOA-2026-00211 by courier' }] },
     ],
     ewallets: [
       { clientCode: 'C-00123', balance: 11951.2, minimumBalance: 10000, createdAt: ago(200), createdBy: 'ACCTG', receiptNo: 'OR-MNL-00000290', clearedDate: ago(200).slice(0, 10), paymentMethod: 'Bank transfer', bankRef: 'BDO 003311', treasuryRef: 'TRS-2026-0112', treasuryConfirmedBy: 'TREAS', treasuryConfirmedAt: ago(200), walletNo: 'EW-MNL-00123' },
@@ -802,7 +955,7 @@ export function buildSeed(): Db {
       { clientCode: 'C-00201', balance: 45000, minimumBalance: 10000, createdAt: ago(170), walletNo: 'EW-CEB-00201' },
       { clientCode: 'C-00230', balance: 9398.56, minimumBalance: 10000, createdAt: ago(150), walletNo: 'EW-MNL-00230', lastReminderAt: ago(5), lastReminderBy: 'ACCTG' },
     ],
-    ewalletTxns: [
+    ewalletTxns: [...extraEwt,
       { id: 'EWT-1', clientCode: 'C-00123', at: ago(200), type: 'Replenishment', amount: 30000, balanceAfter: 30000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000290', receiptNo: 'OR-MNL-00000290', treasuryRef: 'TRS-2026-0112', category: 'Top-up', reason: 'Initial funding (Treasury confirmed)', by: 'ACCTG' },
       { id: 'EWT-2', clientCode: 'C-00123', at: ago(60), type: 'Deduction', amount: -18048.8, balanceAfter: 11951.2, referenceType: 'Rescue', referenceId: 'RSC-000020', category: 'Rescue', by: 'system' },
       { id: 'EWT-3', clientCode: 'C-00230', at: ago(150), type: 'Replenishment', amount: 17000, balanceAfter: 17000, referenceType: 'Top-up', referenceId: 'OR-MNL-00000305', receiptNo: 'OR-MNL-00000305', treasuryRef: 'TRS-2026-0140', category: 'Top-up', by: 'ACCTG' },
@@ -818,6 +971,15 @@ export function buildSeed(): Db {
       { id: 'TU-0', clientCode: 'C-00201', amount: 15000, proofFileName: 'deposit-slip-visayas.jpg', paymentRef: 'MBTC 55120', status: 'Rejected', submittedAt: ago(9), rejectedBy: 'TREAS', rejectedAt: ago(8), rejectReason: 'No matching deposit in the Metrobank account on the slip date — please resubmit with the bank confirmation' }],
     registrations,
     workflows: [...workflows, {
+      // V1.4 row 10: PR-000209 (₱317,200) — Dept Head, Admin and APS done; the final step needs BOTH the CEO and the CHRO (two separate signatures).
+      id: 'WF-PR-0', matrixCode: 'PR_PO', title: 'Purchase request PR-000209 — brake drums and leaf springs', subjectType: 'pr', subjectId: 'PR-000209', amount: 317200, requestedBy: 'DEPTHEAD', requestedAt: ago(6), status: 'Pending', currentStep: 3,
+      steps: [
+        { step: 1, label: 'Department Head', roles: ['DEPT_HEAD'], decision: 'Approved', decidedBy: 'DEPTHEAD', decidedAt: ago(5.9), comment: 'DEPTHEAD:DEPT_HEAD:Within the Q1 PM budget|' },
+        { step: 2, label: 'Admin Department', roles: ['APS_MANAGER'], decision: 'Approved', decidedBy: 'APS', decidedAt: ago(4), comment: 'APS:APS_MANAGER:OK|' },
+        { step: 3, label: 'APS processing', roles: ['APS_OFFICER'], decision: 'Approved', decidedBy: 'APS.OFF', decidedAt: ago(2.5), comment: 'APS.OFF:APS_OFFICER:Quotation checked — Axle & Brake Parts Co.|' },
+        { step: 4, label: 'Final approval — CEO + CHRO (> ₱250,000)', roles: ['CEO', 'CHRO'], decision: 'Pending', dueAt: ahead(1) },
+      ],
+    }, {
       id: 'WF-PR-1', matrixCode: 'PR_PO', title: 'Purchase request PR-000210 — tires', subjectType: 'pr', subjectId: 'PR-000210', amount: 290000, requestedBy: 'BG.MNL', requestedAt: ago(2), status: 'Pending', currentStep: 0,
       steps: [
         { step: 1, label: 'Department Head', roles: ['DEPT_HEAD'], decision: 'Pending', dueAt: ahead(0.5) },
@@ -832,11 +994,21 @@ export function buildSeed(): Db {
     settings: DEFAULT_SETTINGS.map((s) => ({ ...s })),
     // Park & Fix stores CLIENT-OWNED trailers (not in the Delbros fleet, so never in Available / DCIR fleet totals).
     parkFix: [
+      // V1.4 row 54: completed Park & Repair — JO-MNL-000505 closed with actual cost; DM-000042 = the itemized park-out bill.
+      { id: 'PF-3', chassisNo: 'VFS-TRL-0311', clientOwned: true, chassisType: 'EQ1', plateNo: 'GAB 3110', clientCode: 'C-00201', branchCode: 'MNL', parkInAt: ago(3), parkOutAt: ago(0.3), reason: 'Awaiting Repair', service: 'Park & Repair', joNo: 'JO-MNL-000505',
+        dailyRate: 350, status: 'Released', inReceiptNo: 'PFR-IN-000004', outReceiptNo: 'PFR-OUT-000005', billingStatus: 'Billed', debitMemoNo: 'DM-000042', billedAmount: 6680, handlingIn: 500, handlingTiming: 'park_out',
+        repairScope: 'Replace brake lining set and one tail lamp', repairEstimate: 5000, agreementRef: 'VFS-PO-2026-118', charges: pf3Charges, dymSignoff: { by: 'DYM.MNL', at: ago(2.9) },
+        parkIn: { trucker: 'Visayas Haulers', truckPlateNo: 'GAB 7781', truckOrcr: 'OR 4109911 / CR 5209911', driverName: 'Rogelio Tan', driverLicenseNo: 'G05-19-224466', inspection: [{ part: 'Brake system', statusCode: 'WRN', qty: 1, chargeable: 0 }, { part: 'Lights & wiring', statusCode: 'DMG', qty: 1, chargeable: 0 }, { part: 'Tires', statusCode: 'OK', qty: 8, chargeable: 0 }], by: 'BG.MNL', signature: DEMO_SIGNATURE },
+        parkOut: { trucker: 'Visayas Haulers', truckPlateNo: 'GAB 7781', truckOrcr: 'OR 4109911 / CR 5209911', driverName: 'Rogelio Tan', driverLicenseNo: 'G05-19-224466', inspection: [{ part: 'Brake system', statusCode: 'RPL', qty: 1, chargeable: 0 }, { part: 'Lights & wiring', statusCode: 'RPL', qty: 1, chargeable: 0 }, { part: 'Tires', statusCode: 'OK', qty: 8, chargeable: 0 }], by: 'BG.MNL', signature: DEMO_SIGNATURE } },
       { id: 'PF-1', chassisNo: 'MCL-TRL-0458', clientOwned: true, chassisType: 'EQ2', plateNo: 'NBC 4581', clientCode: 'C-00230', branchCode: 'MNL', parkInAt: ago(4), reason: 'Idle', service: 'Park only', dailyRate: 350, status: 'Parked',
         expectedParkOut: manilaDay(ahead(10)), inReceiptNo: 'PFR-IN-000003', billingStatus: 'Unbilled', // review 1.1: receipt numbers follow date order (PF-2 in 1, out 2; PF-1 in 3)
+        handlingIn: 500, handlingTiming: 'park_out', // V1.4 row 22: handling-in charge (proposed), billed with the park-out Debit Memo
         parkIn: { trucker: 'Metro Haul', truckPlateNo: 'NCR 1122', truckOrcr: 'OR 4108811 / CR 5208811', remarks: 'Left tail light cracked on arrival (client informed).',driverName: 'Pedro Penduko', driverLicenseNo: 'N02-11-000111', inspection: [{ part: 'Tires', statusCode: 'OK', qty: 8, chargeable: 0 }, { part: 'Lights & wiring', statusCode: 'DMG', qty: 1, chargeable: 0 }, { part: 'Landing legs', statusCode: 'OK', qty: 2, chargeable: 0 }], by: 'BG.MNL' } },
       { id: 'PF-2', chassisNo: 'ABC-CH-2210', clientOwned: true, chassisType: 'EQ1', plateNo: 'NAB 2210', clientCode: 'C-00123', branchCode: 'MNL', parkInAt: ago(20), parkOutAt: ago(12), reason: 'Client Request', service: 'Park only', dailyRate: 350, status: 'Released',
         inReceiptNo: 'PFR-IN-000001', outReceiptNo: 'PFR-OUT-000002', billingStatus: 'Billed', debitMemoNo: 'DM-000039', billedAmount: 2800,
+        // V1.4 rows 21 / 23: DYM sign-off and the stored itemized bill (VAT-inclusive basis keeps DM-000039 = 8 × ₱350 = ₱2,800; no handling-in — record predates the setting).
+        dymSignoff: { by: 'DYM.MNL', at: addHours(ago(20), 1) },
+        charges: { handling: 0, repair: 0, park: 2800, net: 2500, vat: 300, total: 2800, interimBilled: 0, due: 2800, vatBasis: 'inclusive', repairSource: 'Park only — no repair' },
         parkIn: { trucker: 'XYZ Trucking', truckPlateNo: 'NAB 5600', truckOrcr: 'OR 4100200 / CR 5200300',driverName: 'Juan Dela Cruz', driverLicenseNo: 'N01-23-456789', inspection: [{ part: 'Tires', statusCode: 'WRN', qty: 8, chargeable: 0 }], by: 'BG.MNL' },
         parkOut: { trucker: 'XYZ Trucking', truckPlateNo: 'NAB 5600', truckOrcr: 'OR 4100200 / CR 5200300',driverName: 'Juan Dela Cruz', driverLicenseNo: 'N01-23-456789', inspection: [{ part: 'Tires', statusCode: 'OK', qty: 8, chargeable: 0 }], by: 'BG.MNL' } },
     ],
@@ -853,6 +1025,36 @@ export function buildSeed(): Db {
       ...allocReqs, // review 1.1: fulfilled requests behind the six allocated units
     ],
     crossBranchCodes: [],
-    seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 41, INV: 1200, OR: 460, CM: 10, DM: 41, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 251, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1 },
+    seq: { EU: 781, GP: 2000, EIR: 500, JO: 520, RSC: 41, INV: 1200, OR: 460, CM: 10, DM: 42, PR: 210, PO: 155, RR: 60, RFP: 30, PCV: 88, CT: 70, CL: 251, WF: 10, LE: 1, SOA: 318, STK: 120,EWT: 10, HL: 1, DL: 7 },
   };
+  addRecordNotices(seedOut); // Staff UI changes V1.4 rows 30–31
+  return seedOut;
+}
+
+/**
+ * Staff UI changes V1.4 (rows 30–31): seeded notice history behind the "Notifications for this record" panels — rescue requested
+ * (rule N13; urgent = SMS repeated until acknowledged) and completed (N14, client included) for RSC-000041 / RSC-000020, and the
+ * cash-bond withdrawal notice (N07: Sales, C&C, Accounting, Finance) for CB-3 and CB-8. Historical notices are "Sent" (handed to the
+ * channel); notices raised live start as "Queued" for email / SMS until the mail / SMS service reports Sent or Failed.
+ */
+function addRecordNotices(d: Db) {
+  const plus = (iso: string, min: number) => new Date(new Date(iso).getTime() + min * 60_000).toISOString();
+  const emit = (ruleId: string, title: string, body: string, link: string, at: string, o: { branchCode?: string; clientCode?: string; urgent?: boolean } = {}) => {
+    const rule = d.notificationRules.find((r) => r.id === ruleId); if (!rule) return;
+    const inBranch = (u: Db['users'][number]) => !o.branchCode || u.branchAccess === 'ALL' || u.branchCode === o.branchCode || (Array.isArray(u.branchAccess) && u.branchAccess.includes(o.branchCode));
+    const users = d.users.filter((u) => u.status === 'Active' && ((u.realm === 'INTERNAL' && u.roles.some((r) => rule.recipientRoles.includes(r)) && inBranch(u)) || (rule.includeClient && !!o.clientCode && u.clientCode === o.clientCode)));
+    const channels = o.urgent ? rule.channels : rule.channels;
+    users.forEach((u, k) => d.notifications.push({ id: `NT-${ruleId}-${link.replace(/\W+/g, '')}-${k}`, at, title, body, link, read: k % 3 !== 0, requiresAck: !!o.urgent && rule.mode === 'Repeat until ack', userId: u.userId,
+      category: 'Operations', ruleId, channels, recipientRole: u.realm === 'INTERNAL' ? u.roles.find((r) => rule.recipientRoles.includes(r)) : 'Client',
+      delivery: channels.map((ch) => ({ channel: ch, state: 'Sent' as const, at: plus(at, ch === 'In-App' ? 0 : 1) })) }));
+  };
+  const cn = (code: string) => d.clients.find((c) => c.clientCode === code)?.clientName ?? code;
+  for (const r of d.rescues.filter((x) => ['RSC-000041', 'RSC-000020'].includes(x.rescueNo))) {
+    emit('N13', `${r.urgent ? 'URGENT ' : ''}Rescue ${r.rescueNo}: ${cn(r.clientCode)}`, `${r.chassisNo} · ${r.locationText} · ${r.incident}`, `/rescue/${r.rescueNo}`, r.requestedAt, { branchCode: r.branchCode, urgent: r.urgent });
+    if (r.status === 'Completed' && r.completedAt) emit('N14', `Rescue completed: ${r.rescueNo}`, `${cn(r.clientCode)} · total ₱${(r.total ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`, `/rescue/${r.rescueNo}`, r.completedAt, { clientCode: r.clientCode, branchCode: r.branchCode });
+  }
+  for (const b of d.cashBonds.filter((x) => ['CB-3', 'CB-8'].includes(x.id))) {
+    const w = b.withdrawals[0]; if (!w) continue;
+    emit('N07', `Cash bond withdrawal requested — ${b.id}`, `${cn(b.clientCode)} · ₱${w.amount.toLocaleString('en-PH')} · ${w.reason}`, `/cash-bonds?bond=${b.id}`, w.requestedAt);
+  }
 }

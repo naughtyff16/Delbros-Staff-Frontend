@@ -9,7 +9,7 @@ import {
 } from '../../lib/ui';
 import { useAuth } from '../../app/auth';
 import { errMessage, fieldError, useAction, useData, useRefLookups } from '../../shared/hooks';
-import { CreditGateBanner, Crumb } from '../../shared/components';
+import { CreditGateBanner, Crumb, RecordNotices } from '../../shared/components';
 
 const elapsed = (m: number | null | undefined) => (m == null ? '—' : m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`);
 /** Same list as the client portal rescue form (portal review 1.1). */
@@ -62,7 +62,14 @@ const dispatchCol = (userName: (id?: string) => string): ColumnDef<FlatRow> => (
   return <span className="flex flex-col whitespace-nowrap text-xs"><span className="font-medium text-ink-2">{r.crew ?? '—'}</span><span className="text-muted">{r.rescueVehicle ?? ''}{r.driverName ? ` · ${r.driverName}` : ''}</span>
     <span className="text-muted">{r.dispatchedAt ? `Sent ${formatDateTime(r.dispatchedAt)}` : ''}{r.eta ? ` · ETA ${formatDateTime(r.eta)}` : ''}</span>{r.completedAt && <span className="text-success">Completed {formatDateTime(r.completedAt)}{r.completedBy ? ` · ${userName(r.completedBy)}` : ''}</span>}</span>; } });
 /** Review 1.1: Debit Memo number under the charge of a completed rescue. */
-const dmLine = (r: FlatRow) => (r.debitMemoNo ? <span className="block font-mono text-xs text-muted">{r.debitMemoNo}</span> : null);
+/** V1.4 row 29 (RES-006): the Debit Memo number opens the memo record — a link for users who can view memos, plain text otherwise. */
+function DmRef({ no, block }: { no?: string; block?: boolean }) {
+  const { can } = useAuth();
+  if (!no) return null;
+  return can('fin.memo') ? <Link to={`/billing/memos?memo=${no}`} onClick={(e) => e.stopPropagation()} className={cn('whitespace-nowrap font-mono text-brand-700 hover:underline', block && 'block text-xs')} title={`Open Debit Memo ${no}`}>{no}</Link>
+    : <span className={cn('whitespace-nowrap font-mono', block && 'block text-xs text-muted')} title="You do not have access to memos">{no}</span>;
+}
+const dmLine = (r: FlatRow) => (r.debitMemoNo ? <DmRef no={r.debitMemoNo} block /> : null);
 
 /** Client name with its code as a muted second line (one column instead of two; the CSV export carries both in one text). */
 const clientCol = (): ColumnDef<FlatRow> => ({ accessorKey: 'client', header: 'Client', cell: (c) => <span className="flex min-w-36 flex-col"><span>{c.row.original.clientName}</span><span className="font-mono text-xs text-muted">{c.row.original.clientCode}</span></span> });
@@ -78,14 +85,22 @@ function RescueTotals({ rows, range }: { rows: FlatRow[]; range?: string }) {
   const group = (key: (r: FlatRow) => string) => Object.values(done.reduce<Record<string, { key: string; rescues: number; chassis: Set<string>; charged: number; clientName?: string }>>((a, r) => {
     const k = key(r); const g = a[k] ?? { key: k, rescues: 0, chassis: new Set(), charged: 0, clientName: r.clientName }; g.rescues += 1; g.chassis.add(r.chassisNo); g.charged += r.chargeTotal ?? 0; a[k] = g; return a;
   }, {})).map((g) => ({ key: g.key, clientName: g.clientName, rescues: g.rescues, chassisRescued: g.chassis.size, charged: Math.round(g.charged * 100) / 100 }));
-  const byMonth = group((r) => r.requestedAt.slice(0, 7)).sort((a, b) => b.key.localeCompare(a.key)).map((g) => ({ ...g, month: monthLabel(g.key) }));
+  // V1.4 row 28: proposed — list every month of the period (first to last month with rescues), with ₱0 rows for months that had no
+  // COMPLETED rescue; requested-but-open rescues are never counted here (completed counts only).
+  const { setting } = useRefLookups();
+  const zeroMonths = String(setting('res.totals_zero_months') ?? 'true') !== 'false';
+  const monthsWithData = group((r) => r.requestedAt.slice(0, 7));
+  const span = (() => { if (!zeroMonths || !months.length) return []; const [a, b] = [months[0], months[months.length - 1]]; const out: string[] = []; let [y, m] = a.split('-').map(Number); const [ey, em] = b.split('-').map(Number);
+    while (y < ey || (y === ey && m <= em)) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++; } } return out; })();
+  const byMonth = [...monthsWithData, ...span.filter((k) => !monthsWithData.some((g) => g.key === k)).map((k) => ({ key: k, clientName: undefined, rescues: 0, chassisRescued: 0, charged: 0 }))]
+    .sort((a, b) => b.key.localeCompare(a.key)).map((g) => ({ ...g, month: monthLabel(g.key) }));
   const byClient = group((r) => r.clientCode).sort((a, b) => b.charged - a.charged).map((g) => ({ ...g, clientCode: g.key }));
   const sum = (k: 'rescues' | 'chassisRescued' | 'charged') => byMonth.reduce((a, g) => a + g[k], 0);
   return (
     <div className="mt-5 grid gap-5 lg:grid-cols-2">
       {/* One frame per panel: the title sits in the table's own header row, beside Export. */}
       <DataTable data={byMonth} searchable={false} dense exportName="rescue-totals-by-month" emptyTitle="No completed rescues in the selected range"
-        toolbar={<div><h3 className="text-[15px] font-semibold text-ink">Totals by month</h3><p className="text-[13px] text-muted">Completed rescues · {covered} · {plural(sum('rescues'), 'rescue')} · {formatPhp(sum('charged'))} charged</p></div>}
+        toolbar={<div><h3 className="text-[15px] font-semibold text-ink">Totals by month</h3><p className="text-[13px] text-muted">Completed rescues · {covered} · {plural(sum('rescues'), 'rescue')} · {formatPhp(sum('charged'))} charged{zeroMonths ? ' · months with no completed rescue show 0 (proposed)' : ''}</p></div>}
         columns={[{ accessorKey: 'month', header: 'Month' }, { accessorKey: 'rescues', header: 'Rescues', meta: { align: 'right' } },
           { accessorKey: 'chassisRescued', header: 'Chassis rescued', meta: { align: 'right' } }, { accessorKey: 'charged', header: 'Charged', meta: { align: 'right' }, cell: (c) => <span className="whitespace-nowrap">{formatPhp(c.getValue<number>())}</span> }]} />
       <DataTable data={byClient} searchable={false} dense exportName="rescue-totals-by-client" emptyTitle="No completed rescues in the selected range"
@@ -198,7 +213,7 @@ export function RescueRequestModal({ onClose, onDone, clientLocked }: { onClose:
           <Select label="Load status" required value={v.loadStatus} onChange={(e) => setV({ ...v, loadStatus: e.target.value as 'Loaded' | 'Empty' })} placeholder="Select" options={[{ value: 'Loaded', label: 'Loaded (container / cargo on chassis)' }, { value: 'Empty', label: 'Empty' }]} />
           <Select label="Dispatch branch" required value={v.branchCode} onChange={(e) => setV({ ...v, branchCode: e.target.value })} placeholder={v.chassisNo ? 'Select' : 'Select a unit first'} options={branchOptions} hint="Branch that sends the crew. Defaults to the unit's home branch; change it to the branch nearest the scene." />
         </FormGrid>
-        <Switch label={<span className="flex items-center gap-1.5"><Siren className="size-4 text-danger" /> Urgent</span>} description="Repeats SMS until acknowledged" checked={v.urgent} onChange={(u) => setV({ ...v, urgent: u })} />
+        <Switch label={<span className="flex items-center gap-1.5"><Siren className="size-4 text-danger" /> Urgent</span>} description="Repeats SMS until acknowledged. Two levels (Normal / Urgent) — whether more priority levels are needed (NOT-005) is pending Delbros confirmation." checked={v.urgent} onChange={(u) => setV({ ...v, urgent: u })} />
         <div>
           <div className="flex items-end gap-2">
             <Input wrapperClassName="flex-1" label="Current location" required placeholder="Address, landmark or highway km" value={v.locationText} onChange={(e) => setV({ ...v, locationText: e.target.value })} />
@@ -388,6 +403,8 @@ export function RescueDetailPage() {
           </Card>
         </Stack>
       </div>
+      {/* V1.4 row 30: record-linked notices — requested / dispatched / completed, recipients, channels, delivery state and urgent SMS acknowledgment. */}
+      <div className="mt-5"><RecordNotices refNo={r.rescueNo} title="Notifications for this rescue" /></div>
       <Modal open={done} onClose={() => setDone(false)} title="Complete rescue?" footer={<><Button variant="secondary" onClick={() => setDone(false)}>Back</Button><Button variant="success" loading={complete.isPending} onClick={() => complete.mutate(undefined)}>Complete rescue</Button></>}>
         <p className="text-sm text-ink-2">Total <strong>{formatPhp(charge.total)}</strong> (travel {formatPhp(charge.travel)}, tire {formatPhp(lineTotals.tireCost)}, parts {formatPhp(lineTotals.partsCost)}, service {formatPhp(charge.service)}, VAT {formatPhp(charge.vat)}).
           {cost.chargeable ? ' After completion, generate the Debit Memo to deduct it from the client e-wallet.' : ' Not chargeable to the client.'} The client, Operations, C&C and Accounting are notified.</p>
@@ -423,7 +440,7 @@ export function RescueDashboardPage() {
   return (
     <>
       <PageHeader title="Rescue dashboard"
-        description={`Live board of open rescues, itemised rescue transactions and totals by month and client. Elapsed runs from request to completion; amber at ${sla.amber}h, red at ${sla.red}h.`} />
+        description={`Live board of open rescues, itemised rescue transactions and totals by month and client. Elapsed runs from request to completion; amber at ${sla.amber}h, red at ${sla.red}h — proposed SLA, pending Delbros confirmation (not a BRD requirement).`} />
       <Card className="mb-5">
         <div className="flex flex-wrap items-end gap-3">
           <Select label="Period" value={period} onChange={(e) => setPeriodValue(e.target.value)} options={[{ value: '', label: 'All dates' }, ...monthOptions(), { value: 'custom', label: 'Custom range…' }]} />
@@ -447,7 +464,7 @@ export function RescueDashboardPage() {
       <div className="grid items-start gap-5 lg:grid-cols-3">
         <div className="min-w-0 lg:col-span-2">
           <DataTable data={openRows} loading={board.isLoading} onRowClick={(r) => nav(`/rescue/${r.rescueNo}`)} emptyTitle="No open rescues" emptyHint="Open requests appear here with their elapsed time." searchable={false}
-            footer={<span className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted"><span className="font-medium text-ink-2">All {plural(openRows.length, 'open rescue')} shown</span><span>Elapsed: normal</span><span className="text-warning">amber ≥ {sla.amber}h</span><span className="font-bold text-danger">red ≥ {sla.red}h</span><span>· click a row to open the rescue</span></span>} columns={[
+            footer={<span className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted"><span className="font-medium text-ink-2">All {plural(openRows.length, 'open rescue')} shown</span><span>Elapsed (proposed SLA, pending confirmation): normal</span><span className="text-warning">amber ≥ {sla.amber}h</span><span className="font-bold text-danger">red ≥ {sla.red}h</span><span>· click a row to open the rescue</span></span>} columns={[
             { accessorKey: 'rescueNo', header: 'Ref', cell: (c) => <span className="flex items-center gap-1.5 font-mono font-medium text-brand-700 group-hover:underline">{c.getValue<string>()}{c.row.original.urgent && <Badge tone="danger" icon={<Siren className="size-3" />}>Urgent{c.row.original.urgentAckAt ? ' · ack' : ''}</Badge>}</span> },
             { accessorKey: 'clientCode', header: 'Client code', cell: (c) => <span className="font-mono">{c.getValue<string>()}</span> }, { accessorKey: 'clientName', header: 'Client' }, { accessorKey: 'branchCode', header: 'Branch' }, { accessorKey: 'status', header: 'Status', cell: (c) => <StatusBadge domain="rescue" value={c.getValue<string>()} /> },
             { accessorKey: 'elapsedMin', header: 'Elapsed', meta: { align: 'right' }, cell: (c) => <span className={cn('rounded px-1.5 py-0.5', sla.tone(c.getValue<number | null>(), true))}>{elapsed(c.getValue<number | null>())}</span> }]} />
@@ -469,7 +486,7 @@ export function RescueDashboardPage() {
         { accessorKey: 'completedAt', header: 'Completed', cell: (c) => (c.getValue<string>() ? <span className="whitespace-nowrap">{formatDateTime(c.getValue<string>())}</span> : <span className="text-muted">—</span>) },
         { accessorKey: 'rescueVehicle', header: 'Dispatch (vehicle · driver)', cell: (c) => { const r = c.row.original; return r.rescueVehicle || r.driverName ? <span className="flex flex-col whitespace-nowrap text-xs"><span>{r.rescueVehicle ?? '—'}</span><span className="text-muted">{r.driverName ?? '—'}{r.crew ? ` · ${r.crew}` : ''}</span></span> : <span className="text-muted">—</span>; } },
         { accessorKey: 'oneWayKm', header: 'Km (one way)', meta: { align: 'right' }, cell: (c) => (c.getValue() != null ? <span className="whitespace-nowrap" title={`${c.getValue<number>()} km × 2 × ${formatPhp(c.row.original.ratePerKm ?? 0)}/km`}>{c.getValue<number>()} km</span> : '—') },
-        ...breakdownCols(), { accessorKey: 'debitMemoNo', header: 'Debit memo', cell: (c) => (c.getValue<string>() ? <span className="whitespace-nowrap font-mono">{c.getValue<string>()}</span> : '—') }]} />
+        ...breakdownCols(), { accessorKey: 'debitMemoNo', header: 'Debit memo', cell: (c) => (c.getValue<string>() ? <DmRef no={c.getValue<string>()} /> : '—') }]} />
       <p className="mt-2 text-xs text-muted">The table scrolls sideways: after Parts come Service 10%, VAT 12%, Total and Debit memo. Branch = dispatching branch (the chart groups by it); the unit's home branch shows under it when different. Open (live) counts every request not yet Completed, Cancelled or Blocked; the unit itself shows the fleet status Rescue only from dispatch until completion.</p>
       <RescueTotals rows={rows} range={range} />
     </>

@@ -3,14 +3,14 @@ import { Navigate, useNavigate, useParams } from 'react-router';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, CalendarClock, CheckCircle2, ChevronRight, ClipboardCheck, SquareParking, Download, FileBarChart, LifeBuoy, Lock, Play, Printer, Search, ShieldAlert, Truck, Wrench } from 'lucide-react';
 import { api } from '../../lib/api-client';
-import { formatDate, formatDateTime, formatNumber, formatPhp, todayManila } from '../../lib/shared';
+import { formatDate, formatDateTime, formatNumber, formatPhp, todayManila, FLEET_OTHER_STATUSES } from '../../lib/shared';
 import { Badge, Banner, Button, Card, CardHeader, Checkbox, DataTable, DateRangeFilter, EmptyState, Input, KpiTile, PageHeader, Select, StatusBadge, cn, sentenceCase, stripCodes, type ColumnDef } from '../../lib/ui';
 import { useAuth } from '../../app/auth';
 import { errMessage, useData, useRefLookups } from '../../shared/hooks';
 import { Crumb, ScreenTag } from '../../shared/components';
 import { DocFooter, DocHeader, PrintPreview } from '../../shared/print';
 
-const STATUS_COLORS: Record<string, string> = { Available: '#15803D', Allocated: '#3878B8', 'On Hire': '#0058A8', Breakdown: '#B42318', 'In Repair': '#DC6803', Rescue: '#F79009', Parked: '#7A5AF8' };
+const STATUS_COLORS: Record<string, string> = { Available: '#15803D', Allocated: '#3878B8', 'On Hire': '#0058A8', Breakdown: '#B42318', 'In Repair': '#DC6803', Rescue: '#F79009', Parked: '#7A5AF8', Other: '#667085' };
 
 /** Compact panel header: icon chip, title and "View all" on one centred line, no reserved description space. */
 const PanelHead = ({ title, icon: Icon, onAll }: { title: string; icon: typeof Truck; onAll: () => void }) => (
@@ -21,11 +21,12 @@ const PanelHead = ({ title, icon: Icon, onAll }: { title: string; icon: typeof T
 );
 
 /** Fleet status tile: coloured icon chip (same colours as the fleet chart), count, label and a "View list" cue. */
-const STATUS_ICON: Record<string, typeof Truck> = { Available: CheckCircle2, Allocated: ClipboardCheck, 'On Hire': Truck, 'In Repair': Wrench, Rescue: LifeBuoy, Breakdown: AlertTriangle, Parked: SquareParking };
+const STATUS_ICON: Record<string, typeof Truck> = { Available: CheckCircle2, Allocated: ClipboardCheck, 'On Hire': Truck, 'In Repair': Wrench, Rescue: LifeBuoy, Breakdown: AlertTriangle, Parked: SquareParking, Other: FileBarChart };
 /** Staff review 1.2: what each fleet tile counts (unit status on the chassis master, not requests or job orders). */
 const STATUS_HINT: Record<string, string> = {
   Available: 'Ready to allocate', Allocated: 'Reserved for a client', 'On Hire': 'Out with clients', 'In Repair': 'Job order confirmed or ongoing',
   Rescue: 'Unit being recovered (set at dispatch)', Breakdown: 'Unroadworthy, repair not started', Parked: 'Fleet unit parked, not for hire',
+  Other: 'New, Unaccounted, Legal, Converted, Sold, Killed', // V1.4 row 13: same "Other" group as the Allocation board
 };
 function StatusTile({ status, value, onClick, note }: { status: string; value: number; onClick: () => void; note?: string }) {
   const Icon = STATUS_ICON[status] ?? Truck, color = STATUS_COLORS[status] ?? '#667085';
@@ -63,7 +64,9 @@ export function OperationsDashboard() {
   const approvals = useData(['approvals'], () => api.inbox.approvals());
   const alerts = useData(['home-alerts'], () => api.inbox.homeAlerts());
   const { userName } = useRefLookups();
-  const count = (s: string) => (board.data ?? []).filter((c) => c.status === s).length;
+  // V1.4 row 13: "Other" uses the Allocation board's mapping, so the two screens always add up to the same fleet.
+  const count = (s: string) => (board.data ?? []).filter((c) => (s === 'Other' ? FLEET_OTHER_STATUSES.includes(c.status) : c.status === s)).length;
+  const tqs = (board.data ?? []).filter((c) => c.readyForSignoff).length; // V1.4 row 14: Allocation "Ready for sign-off" (TQS) count
   const openRescue = (rescues.data ?? []).filter((r) => !['Completed', 'Cancelled', 'Blocked'].includes(r.status));
   // Labels match the sidebar so the same destination always reads the same.
   const quick = [
@@ -104,11 +107,18 @@ export function OperationsDashboard() {
       )}
       {can('alloc.board') && (
         <section className="mb-6" aria-label="Fleet status">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-            {['Available', 'Allocated', 'On Hire', 'In Repair', 'Rescue', 'Breakdown', 'Parked'].map((s) => <StatusTile key={s} status={s} value={count(s)} onClick={() => nav(`/allocation?status=${encodeURIComponent(s)}`)}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+            {['Available', 'Allocated', 'On Hire', 'In Repair', 'Rescue', 'Breakdown', 'Parked', 'Other'].map((s) => <StatusTile key={s} status={s} value={count(s)} onClick={() => nav(`/allocation?status=${encodeURIComponent(s)}`)}
               note={s === 'Rescue' && rescues.data ? `Unit status · ${openRescue.length} open request${openRescue.length === 1 ? '' : 's'}` : undefined} />)}
           </div>
-          <p className="mt-2 text-xs text-muted">Tiles count units by their status on the chassis master and add up to the fleet. Open rescue requests and job orders are listed below; a Draft job order does not move the unit to In repair.</p>
+          {/* V1.4 row 14: units awaiting quality sign-off — a subset of the tiles above (not another fleet status, so not added to the total). */}
+          <button type="button" onClick={() => nav('/allocation?ready=1')} className="mt-3 flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-dashed border-success/40 bg-success-bg/40 px-4 py-2.5 text-left text-sm hover:border-success hover:bg-success-bg/70">
+            <ClipboardCheck className="size-4 text-success" aria-hidden />
+            <span className="font-semibold text-ink">Ready for sign-off (TQS): <span className="tabular text-success">{tqs}</span></span>
+            <span className="text-xs text-muted">Repaired units awaiting quality sign-off before they become Available — same count as Allocation → Ready for sign-off. Already counted in the tiles above, so not added to the fleet total.</span>
+            <span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium text-brand-700">Open on the Allocation board <ChevronRight className="size-3" /></span>
+          </button>
+          <p className="mt-2 text-xs text-muted">Tiles count units by their status on the chassis master and add up to the fleet ({(board.data ?? []).length} units). “Other” groups New, Unaccounted, Legal, Converted, Sold and Killed exactly as on the Allocation board; it is shown even at 0 so both screens list the same statuses (whether to show it only when non-zero is pending confirmation). Open rescue requests and job orders are listed below; a Draft job order does not move the unit to In repair.</p>
         </section>
       )}
       {/* Staff review 1.2: per-role alerts — each user sees only the areas their role can open (holds and overdue, registration expiry, low stock, PR / PO, late encoding). */}

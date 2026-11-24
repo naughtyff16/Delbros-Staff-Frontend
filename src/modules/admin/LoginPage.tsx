@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import { Eye, EyeOff, Lock } from 'lucide-react';
 import { api, ApiError } from '../../lib/api-client';
-import { loadAppConfig, loginSchema } from '../../lib/shared';
+import { loadAppConfig, loginSchema, pendingRole, PENDING_ROLES, RESCUE_ROLE_MAPPING } from '../../lib/shared';
 import { Banner, Button, ChangeLogLauncher, Input, Modal } from '../../lib/ui';
 import logo from '../../assets/delbros-logo.png';
 import { landingFor, useAuth } from '../../app/auth';
@@ -129,15 +129,16 @@ export function LoginPage() {
           {demo.map((d) => (
             <button key={d.userId} onClick={() => { setValue('userId', d.userId); setValue('password', 'Demo@2026'); setDemoOpen(false); }}
               className="rounded-lg border border-line px-3 py-2 text-left hover:border-brand-300 hover:bg-brand-50">
-              <p className="font-mono text-[13px] font-semibold text-brand-700">{d.userId}</p>
+              <p className="flex items-center justify-between gap-1 font-mono text-[13px] font-semibold text-brand-700">{d.userId}
+                {d.roles.some((r) => pendingRole(r)) && <span className="rounded-full border border-warning-line bg-warning-bg px-1.5 font-sans text-[10px] font-medium text-warning" title={d.roles.map((r) => pendingRole(r)?.frsMapping).filter(Boolean).join(' ')}>Role pending confirmation</span>}</p>
               <p className="text-[13px] text-ink">{d.name}</p><p className="text-xs text-muted">{d.designation}</p>
               {/* Staff review 1.2: branch scope and a short permission summary on every card. */}
               <p className="mt-1 text-[11px] text-ink-2"><span className="font-medium">Scope:</span> {d.scope}</p>
-              <p className="text-[11px] text-muted" title={d.viewModules.join(', ')}>Opens {d.viewModules.length} module{d.viewModules.length === 1 ? '' : 's'}{d.approveModules.length ? ` · approves in ${d.approveModules.join(', ')}` : ' · no approvals'}</p>
+              <p className="text-[11px] text-muted" title={d.viewModules.join(', ')}>Opens {d.viewModules.length} module{d.viewModules.length === 1 ? '' : 's'}{d.approveModules.length ? ` · approves in ${d.approveModules.join(', ')}` : ''}{d.specialApprovals.length ? ` · approves ${d.specialApprovals.join(', ')}` : ''}{!d.approveModules.length && !d.specialApprovals.length ? ' · no approvals' : ''}</p>
             </button>
           ))}
         </div>
-        <p className="mt-3 text-xs text-muted">User ID rule in this demo: role code, plus the branch for branch-based users (BG.MNL, DYM.MNL, BH.MNL); Head Office users have the role code only (ADMIN, TREAS). Branch Head, Dispatcher and Gate Clerk are proposed roles, pending confirmation. The picker and the shared password are hidden when <code className="font-mono">showDemoLogins</code> is off (production).</p>
+        <p className="mt-3 text-xs text-muted">User ID rule in this demo: role code, plus the branch for branch-based users (BG.MNL, DYM.MNL, BH.MNL); Head Office users have the role code only (ADMIN, TREAS). Roles not in the FRS role list, all pending Delbros confirmation of name, scope and permissions: {PENDING_ROLES.map((p) => `${p.label} (${p.demoUser})`).join(', ')}. Rescue Coordinator vs Rescue Dispatcher: {RESCUE_ROLE_MAPPING} The picker and the shared password are hidden when <code className="font-mono">showDemoLogins</code> is off (production).</p>
       </Modal>
     </div>
   );

@@ -5,7 +5,7 @@ import { AlertTriangle, Ban, CheckCircle2, ChevronRight, Download, FileText, His
 import { api, ApiError } from '../../lib/api-client';
 import { creditUtilisation, todayManila, formatDate, formatDateTime, formatPhp, holdLiftTier, nextCollectionStage, soaWindow, type CollectionStage, type GateAction } from '../../lib/shared';
 import {
-  ApprovalTimeline, Badge, Banner, Button, Card, CardHeader, ConfirmDialog, DataTable, DatePicker, Drawer, EmptyState, FormGrid, Input, KpiTile, Modal, MoneyText, PageHeader, Select, Stack, StatusBadge, Textarea, cn, userText, type ColumnDef,
+  ApprovalTimeline, Badge, Banner, Button, Card, CardHeader, ConfirmDialog, DataTable, DatePicker, Drawer, EmptyState, FormGrid, Input, KeyValueGrid, KpiTile, Modal, MoneyText, PageHeader, Select, Stack, StatusBadge, Textarea, cn, userText, type ColumnDef,
 } from '../../lib/ui';
 import { useAuth } from '../../app/auth';
 import { errMessage, useAction, useData, useRefLookups } from '../../shared/hooks';
@@ -345,7 +345,15 @@ export function AgingPage() {
           <p className="text-sm">Current stage <StatusBadge domain="collection" value={h.stage} />{h.nextActionDue && <span className="ml-2 text-muted">next action {formatDate(h.nextActionDue)}</span>}</p>
           {h.actionOverdueDays > 0 && <Banner tone="danger" title="Escalation alert">No action for {h.actionOverdueDays} day(s) after the due date — C&amp;C Manager is alerted after 1–2 days.</Banner>}
           <Card><CardHeader title="Stage history & action log" />{h.history.length ? <ul className="divide-y divide-line">{h.history.map((a, i) => <li key={i} className="py-2 text-sm"><p className="font-medium">{a.action === 'Demand Letter' ? 'Demand letter' : a.action}</p><p className="text-xs text-muted">{formatDateTime(a.at)} · {userName(a.by)}{a.notes ? ` · ${a.notes}` : ''}{a.letter ? ' · letter attached' : ''}</p></li>)}</ul> : <p className="text-sm text-muted">No collection actions yet.</p>}</Card>
-          <Card><CardHeader title="SOA send log" />{h.sends.length ? <ul className="divide-y divide-line">{h.sends.map((s) => <li key={s.id} className="py-2 text-sm"><p><span className="font-mono">{s.soaNo}</span> · {s.channel} · {s.to}{s.trackingNo ? ` · ${s.trackingNo}` : ''}</p><p className="text-xs text-muted">{formatDateTime(s.at)} · {userName(s.by)}</p></li>)}</ul> : <p className="text-sm text-muted">SOA not sent yet.</p>}
+          {/* V1.4 row 49 (CNC-006): the final demand issued by the Legal department. */}
+          {h.demandLetter && <Card><CardHeader title={`Final demand — ${h.demandLetter.letterRef}`} description="Issued by the Legal department as the last collection step." />
+            <KeyValueGrid cols={2} items={[{ label: 'Legal owner', value: h.demandLetter.legalOwner }, { label: 'Approved', value: h.demandLetter.approvedBy ? `${userName(h.demandLetter.approvedBy)}${h.demandLetter.approvedAt ? ` · ${formatDateTime(h.demandLetter.approvedAt)}` : ''}` : '—' },
+              { label: 'Issued', value: formatDateTime(h.demandLetter.issuedAt) }, { label: 'Amount demanded', value: formatPhp(h.demandLetter.amount) },
+              { label: 'Letter', value: h.demandLetter.file ?? 'Attachment pending' }, { label: 'Recipient', value: h.demandLetter.recipient },
+              { label: 'Sent by', value: `${h.demandLetter.channel}${h.demandLetter.courier ? ` · ${h.demandLetter.courier}` : ''}${h.demandLetter.trackingNo ? ` · ${h.demandLetter.trackingNo}` : ''}` },
+              { label: 'Delivery', value: <span>{h.demandLetter.delivery.status}{h.demandLetter.delivery.at ? ` · ${formatDate(h.demandLetter.delivery.at)}` : ''}{h.demandLetter.delivery.receivedBy ? ` · ${h.demandLetter.delivery.receivedBy}` : ''}{h.demandLetter.delivery.podFile ? <span className="block text-xs text-muted">POD {h.demandLetter.delivery.podFile}</span> : null}</span> }]} />
+            {h.demandLetter.delivery.notes && <p className="mt-2 text-xs text-muted">{h.demandLetter.delivery.notes}</p>}</Card>}
+          <Card><CardHeader title="SOA send log" />{h.sends.length ? <ul className="divide-y divide-line">{h.sends.map((s) => <li key={s.id} className="py-2 text-sm"><p><span className="font-mono">{s.soaNo}</span> · {s.channel}{s.courier ? ` (${s.courier})` : ''} · {s.to}{s.trackingNo ? ` · ${s.trackingNo}` : ''}{s.delivery && s.delivery.status !== 'In transit' ? ` · ${s.delivery.status.toLowerCase()} ${formatDate(s.delivery.at)}${s.delivery.receivedBy ? ` (${s.delivery.receivedBy})` : ''}` : s.delivery ? ' · in transit' : ''}</p><p className="text-xs text-muted">{formatDateTime(s.at)} · {userName(s.by)}</p></li>)}</ul> : <p className="text-sm text-muted">SOA not sent yet.</p>}
             <p className="mt-2 text-xs text-muted">Acknowledged {h.acknowledgedAt ? formatDate(h.acknowledgedAt) : '— (30-day window starts at acknowledgment)'}</p></Card>
           {can('cnc.aging', 'edit') && <Card><CardHeader title="Log client contact" description="Call, email or visit — with an optional promise to pay. You become the collection owner if none is set." />
             <Stack>
@@ -389,7 +397,9 @@ export function SoaPage() {
   const { userName, setting } = useRefLookups();
   const payee = String(setting('co.payee_bank') ?? '').trim();
   const [print, setPrint] = useState(false);
-  const [send, setSend] = useState<{ channel: 'Email' | 'Courier'; to: string; trackingNo: string } | null>(null);
+  const [send, setSend] = useState<{ channel: 'Email' | 'Courier'; to: string; trackingNo: string; courier?: string; recipientName?: string } | null>(null);
+  const [dlv, setDlv] = useState<{ id: string; status: 'Delivered' | 'Returned'; at: string; receivedBy: string; podFile: string } | null>(null); // V1.4 row 48
+  const rec = useAction(() => api.credit.recordDelivery(code, { kind: 'soa', id: dlv!.id }, dlv!), { success: 'Delivery result recorded', onSuccess: () => setDlv(null) });
   const [ack, setAck] = useState<string | null>(null);
   const snd = useAction(() => api.credit.sendSoa(code, send!), { success: (s) => `SOA ${s.soaNo} sent by ${s.channel.toLowerCase()}`, onSuccess: () => setSend(null) });
   const ak = useAction((dt: string) => api.credit.acknowledgeSoa(code, dt), { success: 'Acknowledgment recorded — 30-day window started', onSuccess: () => setAck(null) });
@@ -429,7 +439,14 @@ export function SoaPage() {
       {!s.acknowledgedAt && !!s.sends.length && <Banner tone="info" className="mb-4">Sent {formatDate(s.sends[0].at)} — awaiting client acknowledgment; the 30-day payment window starts at acknowledgment. Whether the SOA is a draft until acknowledged is pending confirmation.</Banner>}
       <Card><DocHeader title="STATEMENT OF ACCOUNT" no={s.soaNo} date={formatDate(s.asOf)} /><Body /></Card>
       <Card className="mt-5"><CardHeader title="Send log" description="Who sent the SOA, when and by which channel" />
-        {s.sends.length ? <DataTable data={s.sends} searchable={false} columns={[{ accessorKey: 'at', header: 'Sent', cell: (c) => formatDateTime(c.getValue<string>()) }, { accessorKey: 'soaNo', header: 'SOA no.' }, { accessorKey: 'channel', header: 'Channel' }, { accessorKey: 'to', header: 'To' }, { accessorKey: 'trackingNo', header: 'Tracking' }, { accessorKey: 'by', header: 'By', cell: (c) => userName(c.getValue<string>()) }]} />
+        {s.sends.length ? <DataTable data={s.sends} searchable={false} columns={[{ accessorKey: 'at', header: 'Sent', cell: (c) => formatDateTime(c.getValue<string>()) }, { accessorKey: 'soaNo', header: 'SOA no.' }, { accessorKey: 'channel', header: 'Channel' },
+          { accessorKey: 'to', header: 'To', cell: (c) => <span>{c.getValue<string>()}{c.row.original.recipientName && <span className="block text-xs text-muted">Attn: {c.row.original.recipientName}</span>}</span> },
+          { accessorKey: 'trackingNo', header: 'Courier / tracking', cell: (c) => (c.row.original.channel === 'Courier' ? <span className="whitespace-nowrap">{c.row.original.courier ?? 'Courier'}<span className="block font-mono text-xs text-muted">{c.getValue<string>() ?? '—'}</span></span> : '—') },
+          // V1.4 row 48 (CNC-005): the courier result — delivered / returned, date, who received it and the proof of delivery.
+          { id: 'dlv', header: 'Delivery result', cell: (c) => { const x = c.row.original; if (x.channel !== 'Courier') return <span className="text-xs text-muted">Email — sent with the PDF (bounces are reported by the mail service)</span>;
+            const d = x.delivery; return d && d.status !== 'In transit' ? <span className="flex flex-col text-xs"><Badge tone={d.status === 'Delivered' ? 'success' : 'danger'}>{d.status}</Badge><span>{formatDate(d.at)}{d.receivedBy ? ` · ${d.receivedBy}` : ''}</span>{d.podFile && <span className="text-muted">POD {d.podFile}</span>}</span>
+              : <span className="flex flex-col items-start gap-1"><Badge tone="warning">In transit</Badge>{can('cnc.aging', 'edit') && <Button size="sm" variant="secondary" onClick={() => setDlv({ id: x.id, status: 'Delivered', at: today(), receivedBy: '', podFile: '' })}>Record delivery</Button>}</span>; } },
+          { accessorKey: 'by', header: 'By', cell: (c) => userName(c.getValue<string>()) }]} />
           : <p className="text-sm text-muted">Not sent yet. Use “Send SOA” to email or courier it.</p>}
       </Card>
       <PrintPreview open={print} onClose={() => setPrint(false)} title={s.soaNo}><DocHeader title="STATEMENT OF ACCOUNT" no={s.soaNo} date={formatDate(s.asOf)} /><Body /><DocFooter copy="CLIENT COPY" /></PrintPreview>
@@ -438,8 +455,21 @@ export function SoaPage() {
         {send && <Stack>
           <Select label="Channel" required value={send.channel} onChange={(e) => setSend({ ...send, channel: e.target.value as 'Email' | 'Courier', to: e.target.value === 'Email' ? s.contactEmail : addr })} options={[{ value: 'Email', label: 'Email (PDF attached)' }, { value: 'Courier', label: 'Courier (printed copy)' }]} />
           <Input label={send.channel === 'Email' ? 'Recipient email' : 'Delivery address'} required value={send.to} onChange={(e) => setSend({ ...send, to: e.target.value })} placeholder={send.channel === 'Email' ? 'e.g. name@company.ph' : 'Unit, building, street, city'} />
-          {send.channel === 'Courier' && <Input label="Courier / tracking no." value={send.trackingNo} onChange={(e) => setSend({ ...send, trackingNo: e.target.value })} placeholder="e.g. LBC 1234 5678 9012" />}
+          {send.channel === 'Courier' && <>
+            <Select label="Courier" required value={send.courier ?? ''} onChange={(e) => setSend({ ...send, courier: e.target.value })} placeholder="Select" options={['LBC Express', 'JRS Express', '2GO Express', 'Air21', 'Company messenger'].map((x) => ({ value: x, label: x }))} />
+            <Input label="Attention / recipient" value={send.recipientName ?? ''} onChange={(e) => setSend({ ...send, recipientName: e.target.value })} placeholder="e.g. Accounts Payable head" />
+            <Input label="Tracking no." value={send.trackingNo} onChange={(e) => setSend({ ...send, trackingNo: e.target.value })} placeholder="e.g. LBC 1234 5678 9012" hint="The delivery result is recorded from the send log once the courier confirms" /></>}
           {snd.error && <Banner tone="danger">{errMessage(snd.error)}</Banner>}
+        </Stack>}
+      </Modal>
+      <Modal open={!!dlv} onClose={() => setDlv(null)} title="Record courier delivery" description="Result reported by the courier — kept on the SOA send log with the proof of delivery."
+        footer={<><Button variant="secondary" onClick={() => setDlv(null)}>Cancel</Button><Button loading={rec.isPending} disabled={!dlv?.at || (dlv?.status === 'Delivered' && !dlv.receivedBy.trim())} onClick={() => rec.mutate(undefined)}>Save</Button></>}>
+        {dlv && <Stack>
+          <Select label="Result" required value={dlv.status} onChange={(e) => setDlv({ ...dlv, status: e.target.value as 'Delivered' | 'Returned' })} options={[{ value: 'Delivered', label: 'Delivered' }, { value: 'Returned', label: 'Returned to sender' }]} />
+          <Input label="Date" type="date" required max={today()} value={dlv.at} onChange={(e) => setDlv({ ...dlv, at: e.target.value })} />
+          <Input label="Received by" required={dlv.status === 'Delivered'} value={dlv.receivedBy} onChange={(e) => setDlv({ ...dlv, receivedBy: e.target.value })} placeholder="Name and position, as on the courier receipt" />
+          <Input label="Proof of delivery (file name)" value={dlv.podFile} onChange={(e) => setDlv({ ...dlv, podFile: e.target.value })} placeholder="e.g. LBC-POD-1234.jpg" />
+          {rec.error && <Banner tone="danger">{errMessage(rec.error)}</Banner>}
         </Stack>}
       </Modal>
       <ConfirmDialog open={!!ack} onClose={() => setAck(null)} title="Record client acknowledgment" message={<span>Date the client acknowledged the SOA (starts the 30-day window):<span className="mt-2 block w-48"><DatePicker aria-label="Acknowledgment date" required max={today()} value={ack ?? ''} onChange={setAck} /></span></span>} confirmLabel="Record" loading={ak.isPending} onConfirm={() => ack && ak.mutate(ack)} />

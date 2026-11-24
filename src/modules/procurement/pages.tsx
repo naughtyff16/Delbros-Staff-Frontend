@@ -63,7 +63,8 @@ export function ProcurementPage() {
   const { userName, setting } = useRefLookups();
   const { can } = useAuth();
   const [params] = useSearchParams();
-  const [tab, setTab] = useState(params.get('tab') ?? 'pr');
+  // V1.4 row 12: a user without PR access (e.g. the Stockroom Custodian) opens on Receiving reports.
+  const [tab, setTab] = useState(params.get('tab') ?? (can('prc.pr') ? 'pr' : can('prc.rr') ? 'rr' : 'po'));
   const [newPr, setNewPr] = useState<PrRow | true | null>(null);
   const [prDetail, setPrDetail] = useState<string | null>(params.get('pr'));
   const [convert, setConvert] = useState<string | null>(null);
@@ -88,13 +89,19 @@ export function ProcurementPage() {
   const openPo = (no: string) => { setTab('po'); setPoDetail(no); };
   const myQueue = useData(['approvals'], () => api.inbox.approvals());
   const mine = (wfId?: string) => !!wfId && !!myQueue.data?.pending.some((w) => w.id === wfId);
-  const rules = `PR → Dept Head → Admin → APS → final approval (up to ${formatPhp(threshold)}: APS/MMG Manager; above: CEO + CHRO). Receiving is three-way matched (PO · RR · invoice); payment is held until the match passes. Payments above ${formatPhp(pcvMax)} use RFP, otherwise Petty Cash Voucher.`;
+  const rules = `PR → Dept Head → Admin → APS → final approval (up to ${formatPhp(threshold)}: APS/MMG Manager; above: CEO + CHRO, each signs separately — BR-09 amount pending Delbros confirmation). Receiving is three-way matched (PO · RR · invoice); payment is held until the match passes. Payments above ${formatPhp(pcvMax)} use RFP, otherwise Petty Cash Voucher.`;
   return (
     <>
       <PageHeader title="Procurement" meta={<span tabIndex={0} aria-label={rules} title={rules} className="inline-flex cursor-help items-center gap-1 text-xs text-muted"><Info className="size-4" aria-hidden />Approval rules</span>} description="Purchase requests, purchase orders, receiving reports and payment requests in one place."
         actions={<>{can('prc.pr', 'add') && <Button icon={<FilePlus2 className="size-4" />} onClick={() => setNewPr(true)}>New purchase request</Button>}{can('prc.payment', 'add') && <Button variant="secondary" icon={<Wallet className="size-4" />} onClick={() => setPay({})}>New RFP / PCV</Button>}</>} />
       {data.isError && <Banner className="mb-4" tone="danger" title="Procurement data could not be loaded">{errMessage(data.error)}</Banner>}
-      <Tabs className="mb-4" value={tab} onChange={setTab} items={[{ id: 'pr', label: 'Purchase requests', count: d?.prs.length }, { id: 'po', label: 'Purchase orders', count: d?.pos.length }, { id: 'rr', label: 'Receiving reports', count: d?.rrs.length }, { id: 'pay', label: 'RFP / PCV', count: d?.payments.length }, { id: 'vi', label: 'Vendor invoices', count: d?.vendorInvoices.length }]} />
+      <Tabs className="mb-4" value={tab} onChange={setTab} items={[
+        ...(can('prc.pr') ? [{ id: 'pr', label: 'Purchase requests', count: d?.prs.length }] : []),
+        ...(can('prc.po|prc.rr') ? [{ id: 'po', label: 'Purchase orders', count: d?.pos.length }] : []),
+        ...(can('prc.rr|prc.po|prc.pr') ? [{ id: 'rr', label: 'Receiving reports', count: d?.rrs.length }] : []),
+        ...(can('prc.payment|prc.pr') ? [{ id: 'pay', label: 'RFP / PCV', count: d?.payments.length }] : []),
+        ...(can('prc.po|prc.payment') ? [{ id: 'vi', label: 'Vendor invoices', count: d?.vendorInvoices.length }] : [])]} />
+      {!can('prc.pr') && <Banner className="mb-3" tone="info" title="Receiving access">You can receive deliveries against issued purchase orders and view receiving reports. Purchase requests and their approvals are not part of your role. Whether the Stockroom Custodian keeps receiving is pending Delbros confirmation of the role.</Banner>}
       <p className="-mt-2 mb-3 text-xs text-muted">Tab counts include every record, open and closed.</p>
       {tab === 'pr' && <DataTable data={prs} loading={data.isLoading} exportName="purchase-requests" emptyTitle="No purchase requests" emptyHint="Adjust the filters or create a new purchase request." onRowClick={(r) => setPrDetail(r.prNo)}
         toolbar={<><Select aria-label="Status" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} placeholder="All statuses" options={['Draft', 'For Approval', 'Approved', 'Converted', 'Rejected'].map((x) => ({ value: x, label: x }))} />

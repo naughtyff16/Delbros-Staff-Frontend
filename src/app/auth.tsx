@@ -20,7 +20,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => { await api.auth.logout(); qc.clear(); setUser(null); }, [qc]);
   const value = useMemo<AuthCtx>(() => ({
     user, login, logout,
-    can: (r, a = 'view') => !!user && canFn(user.grants, r, a),
+    // "a|b" = any of the resources (e.g. Procurement opens for PR, PO or RR viewers).
+    can: (r, a = 'view') => !!user && r.split('|').some((x) => canFn(user.grants, x, a)),
     hasRole: (...roles) => !!user && user.roles.some((r) => roles.includes(r)),
   }), [user, login, logout]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -42,7 +43,9 @@ export function landingFor(u: NonNullable<Session>): string {
   if (r.some((x) => ['ACCOUNT_EXECUTIVE', 'SALES_DIRECTOR'].includes(x))) return '/clients';
   if (r.some((x) => ['CNC_OFFICER', 'CNC_MANAGER', 'EXEC_OFFICER'].includes(x))) return '/credit/aging';
   if (r.some((x) => ['ACCOUNTING', 'TREASURY', 'FINANCE_MANAGER'].includes(x))) return '/billing/invoices';
-  if (r.some((x) => ['APS_OFFICER', 'APS_MANAGER', 'DEPT_HEAD', 'WAREHOUSE'].includes(x))) return '/procurement';
+  if (r.some((x) => ['APS_OFFICER', 'APS_MANAGER', 'DEPT_HEAD'].includes(x))) return '/procurement';
+  // Staff UI changes V1.4 (row 12): the Stockroom Custodian has no PR access — land on Inventory (receiving stays under Procurement → Receiving reports).
+  if (r.includes('WAREHOUSE')) return '/inventory';
   if (r.includes('REGULATORY')) return '/regulatory/compliance';
   return '/dashboard';
 }

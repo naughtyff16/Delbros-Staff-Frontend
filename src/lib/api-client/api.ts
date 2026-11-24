@@ -18,6 +18,7 @@ import { invoiceDates, periodDays, memoApprovalChain, debitMemoTotal, CREDIT_MEM
 import { addDays, DEFAULT_SETTINGS, settingMeta, validateSetting, type RateCardRow } from '../shared';
 import type { Action } from '../shared'; // staff review 1.2: demo-user permission summary
 import { registrationState, regIsNear } from '../shared';
+import { parkFixCharges, type ParkFixVatBasis } from '../shared'; // V1.4 Park & Fix itemized charges
 import type { AuditEvent } from '../shared';
 import { todayManila as manilaToday, manilaDay as manilaDayOf } from '../shared'; // allocation / DCIR / repair: "today" is the Manila day
 import { auditHash, auditSystem } from './core';
@@ -60,6 +61,32 @@ async function tx<T>(fn: () => T, ms?: number): Promise<T> {
 }
 
 // ── Derived finance helpers ────────────────────────────────────────────────
+/**
+ * Staff UI changes V1.4 (row 15): ONE low-stock rule for the Dashboard, Executive dashboard, Procurement and Inventory —
+ * the lower of the system quantity and the last physical count is at or below the part's reorder level
+ * (a short count is never reported as OK). Previously the dashboards compared the system quantity only (8 vs 9 lines).
+ */
+export function isLowStock(s: { partCode: string; qtyOnHand: number; lastPhysicalCount?: number | null }) {
+  const threshold = db.parts.find((p) => p.partCode === s.partCode)?.lowStockThreshold ?? 0;
+  return Math.min(s.qtyOnHand, s.lastPhysicalCount ?? s.qtyOnHand) <= threshold;
+}
+
+/** Staff UI changes V1.4 (rows 22–26, 54): repair amount of a Park & Fix record and where it comes from (closed JO = actual parts + labor). */
+function parkFixRepair(p: import('../shared').ParkFixRecord) {
+  if (!p.service || p.service === 'Park only') return { amount: 0, source: 'Park only — no repair', final: true };
+  const jo = db.jobOrders.find((j) => j.joNo === p.joNo);
+  const actual = jo ? round2(jo.bom.reduce((a, l) => a + l.qty * l.unitCost, 0) + jo.labor.reduce((a, l) => a + l.hours * l.rate, 0)) : 0;
+  if (jo && jo.status.startsWith('Closed')) return { amount: actual, source: `Actual cost of ${jo.joNo} (parts + labor, ${jo.status})`, final: true };
+  if (actual) return { amount: actual, source: `${jo!.joNo} cost so far (${jo!.status} — final when closed)`, final: false };
+  return { amount: p.repairEstimate ?? 0, source: p.repairEstimate ? 'Estimate given at park-in (job order not costed yet)' : 'Job order not costed yet', final: false };
+}
+function parkFixBill(p: import('../shared').ParkFixRecord, days: number) {
+  const rep = parkFixRepair(p);
+  const c = parkFixCharges({ days, dailyRate: p.dailyRate, service: p.service, handling: p.handlingTiming === 'park_in' ? 0 : p.handlingIn ?? 0, repair: rep.amount,
+    vatBasis: (S()['alo.parkfix_vat_basis'] ?? 'inclusive') as ParkFixVatBasis, vatPct: Number(S()['fin.vat_pct'] ?? 0.12), interimBilled: p.interimBilled });
+  return { ...c, repairSource: rep.source, repairFinal: rep.final };
+}
+
 export function paymentStatus(i: Invoice): PaymentStatus {
   if (i.status === 'Cancelled') return 'Cancelled';
   const bal = balance(i);
@@ -160,7 +187,9 @@ onWorkflowDone('LATE_ENCODING_CM', (wf, ok) => {
     const existing = db.memos.find((m) => m.workflowId === wf.id);
     const memoNo = existing?.memoNo ?? nextNo('CM', 'CM-', 6);
     if (!existing) db.memos.unshift({ memoNo, type: 'Credit', clientCode: gp.clientCode, referenceType: 'Late Encoding', referenceId: le.id, amount: 0, reason: `Late encoding ${le.daysLate} days — billing corrected to actual date (BR-05)`, status: 'Posted', createdAt: nowIso(), category: 'Late-encoding correction', source: 'Auto', createdBy: 'system', approvalChain: ['Deputy Yard Manager', 'Treasury'], workflowId: wf.id });
-    le.memoNo = memoNo;
+    le.memoNo = memoNo; le.approvedAt = nowIso();
+    // V1.4 row 19: remember which invoice lines this Credit Memo releases, so the approved record keeps its invoice link.
+    le.releasedLines = db.invoices.flatMap((i) => i.lines.filter((l) => l.heldMemoNo === memoNo || (l.held && l.chassisNo === gp.chassisNo)).map((l) => ({ invoiceNo: i.invoiceNo, lineId: l.id, description: l.description, days: l.days, amount: l.amount })));
     releaseHeldLines(memoNo, gp.chassisNo);
     db.invoices.forEach((i) => i.lines.forEach((l) => { if (l.held && l.chassisNo === gp.chassisNo) l.held = false; }));
   } else if (!ok) { const m = db.memos.find((x) => x.workflowId === wf.id); if (m) m.status = 'Rejected'; }
@@ -207,7 +236,13 @@ onWorkflowDone('GATE_OVERRIDE', (wf, ok) => {
 onWorkflowDone('DEMAND_LETTER', (wf, ok) => {
   const cc = db.collections.find((x) => x.clientCode === wf.subjectId); if (!cc) return;
   cc.pendingWorkflowId = undefined;
-  if (ok) collectionAdvance(wf.subjectId, 'Demand letter approved and sent', 'Demand letter');
+  if (ok) {
+    collectionAdvance(wf.subjectId, 'Demand letter approved — issued by the Legal department', 'Demand letter');
+    // V1.4 row 49 (CNC-006): the Legal department's final demand record — reference, legal owner, approval, issue, recipient and delivery.
+    const cl = db.clients.find((c) => c.clientCode === wf.subjectId); const s = [...wf.steps].reverse().find((x) => x.decidedAt);
+    cc.demandLetter = { letterRef: nextNo('DL', `DL-${new Date().getFullYear()}-`, 4), legalOwner: 'Legal Department', approvedBy: s?.decidedBy, approvedAt: s?.decidedAt, issuedAt: nowIso(), amount: wf.amount ?? 0,
+      recipient: [cl?.clientName, cl?.address1, cl?.city].filter(Boolean).join(', '), channel: 'Courier', delivery: { status: 'In transit' } };
+  }
   else cc.actions.unshift({ at: nowIso(), action: 'Demand letter rejected', by: session()?.userId ?? 'system' });
 });
 function collectionAdvance(code: string, notes?: string, letter?: string) {
@@ -382,8 +417,8 @@ function clientExtras(c: Client) {
     holdReason: hold ? `${hold.type}${hold.invoiceNo ? ` — ${hold.invoiceNo} ${hold.daysOverdue ?? ''} days past due at hold${(() => { const i = db.invoices.find((x) => x.invoiceNo === hold.invoiceNo); const d = i && balance(i) > 0 ? daysOverdue(i) : 0; return d > 0 ? ` (now ${d} days)` : ''; })()}` : ''} (DBL-CLT-006) · ${formatPhpPlain(hold.outstanding)} outstanding` : undefined,
     rescueEligible: c.allowRescue && c.status === 'Active' && !!wallet && wallet.balance > 0,
     // Review 1.1 (SCR-06): cash bond on file and the nearest contract expiry, for the list columns.
-    bondHeld: round2(db.cashBonds.filter((b) => b.clientCode === c.clientCode && b.status !== 'Refunded').reduce((a, b) => a + bondBalance(b), 0)),
-    bondCount: db.cashBonds.filter((b) => b.clientCode === c.clientCode && b.status !== 'Refunded').length,
+    bondHeld: round2(db.cashBonds.filter((b) => b.clientCode === c.clientCode && b.status !== 'Refunded' && b.status !== 'Applied').reduce((a, b) => a + bondBalance(b), 0)),
+    bondCount: db.cashBonds.filter((b) => b.clientCode === c.clientCode && b.status !== 'Refunded' && b.status !== 'Applied').length,
     nextExpiry: db.contracts.filter((x) => x.clientCode === c.clientCode && ['Active', 'Expired'].includes(x.status) && x.expiryDate && !x.renewedTo).map((x) => ({ contractNo: x.contractNo, expiryDate: x.expiryDate!, status: x.status, contractType: x.contractType })).sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))[0],
     // Review 1.2 (client list / profile): open-ended (SPL) contract, contract types, credit term, overdue part of the outstanding balance.
     openEnded: db.contracts.find((x) => x.clientCode === c.clientCode && x.status === 'Active' && !x.expiryDate)?.contractNo,
@@ -509,7 +544,10 @@ export const api = {
         const mods = (a: Action) => [...new Set(RESOURCES.filter((r) => g[r.id]?.includes(a)).map((r) => r.module))];
         return { userId: u.userId, name: u.name, designation: u.designation, realm: u.realm, roles: u.roles, branchCode: u.branchCode, branchAccess: u.branchAccess, department: u.department,
           scope: u.branchAccess === 'ALL' ? 'All branches' : u.branchAccess.length ? u.branchAccess.map((b) => db.branches.find((x) => x.code === b)?.name ?? b).join(', ') : '—',
-          viewModules: mods('view'), approveModules: mods('approve'), resources: Object.keys(g).length };
+          viewModules: mods('view'), approveModules: mods('approve'), resources: Object.keys(g).length,
+          // V1.4 row 8: approvals that are actions on a record rather than an "approve" grant — the AE approves its clients' portal
+          // registrations with one click (DBL-CLT-019) from the client record; no other approval permission is granted.
+          specialApprovals: u.roles.includes('ACCOUNT_EXECUTIVE') ? ['portal registrations of own clients (DBL-CLT-019)'] : [] as string[] };
       });
     },
     resetDemo() { resetDb(); setSession(null); },
@@ -780,7 +818,7 @@ export const api = {
           out.push({ key: 'reg', label: 'Registrations expired / ≤ 30 days', value: exp + near, detail: `${exp} expired · ${near} expiring within 30 days`, link: '/regulatory/compliance', tone: exp ? 'danger' : near ? 'warning' : 'info' });
         }
         if (can('inv.balance')) {
-          const low = db.stock.filter((s) => s.qtyOnHand <= (db.parts.find((p) => p.partCode === s.partCode)?.lowStockThreshold ?? 0) && (u.branchAccess === 'ALL' || !u.warehouseCode || s.warehouseCode === u.warehouseCode));
+          const low = db.stock.filter((s) => isLowStock(s) && (u.branchAccess === 'ALL' || !u.warehouseCode || s.warehouseCode === u.warehouseCode));
           out.push({ key: 'stock', label: 'Low-stock lines', value: low.length, detail: low.length ? `${[...new Set(low.map((s) => s.warehouseCode))].join(', ')}` : 'All above minimum', link: '/inventory', tone: low.length ? 'warning' : 'info' });
         }
         if (can('prc.pr') || can('prc.po')) {
@@ -792,6 +830,37 @@ export const api = {
           out.push({ key: 'late', label: 'Late encoding awaiting approval', value: le, detail: le ? 'Credit Memo path (DYM / Treasury)' : 'None pending', link: '/gate/late', tone: le ? 'warning' : 'info' });
         }
         return out;
+      });
+    },
+    /**
+     * Staff UI changes V1.4 (rows 30–31): the notices sent for one record (rescue, cash bond…) — event, rule, channels, every recipient
+     * with read / acknowledgment, and the per-channel delivery state. For repeat-until-ack rules (urgent rescue SMS) the repeats sent
+     * so far are derived from the rule interval up to the acknowledgment (or now).
+     */
+    async recordNotices(ref: string, link?: string) {
+      me();
+      return tx(() => {
+        const hits = db.notifications.filter((n) => (link && n.link === link) || (n.link ?? '').includes(ref) || n.title.includes(ref) || n.body.includes(ref));
+        const groups = new Map<string, { key: string; title: string; body: string; at: string; ruleId?: string; ruleName?: string; channels: string[]; requiresAck: boolean; repeatMinutes?: number;
+          recipients: { userId: string; name: string; role?: string; read: boolean; ackAt?: string; ackBy?: string }[]; delivery: { channel: string; state: string; at?: string }[] }>();
+        for (const n of hits) {
+          const key = `${n.title}|${n.at.slice(0, 16)}`;
+          const rule = db.notificationRules.find((r) => r.id === n.ruleId);
+          const g = groups.get(key) ?? { key, title: n.title, body: n.body, at: n.at, ruleId: n.ruleId, ruleName: rule?.description, channels: n.channels ?? rule?.channels ?? ['In-App'], requiresAck: n.requiresAck, repeatMinutes: rule?.repeatMinutes, recipients: [], delivery: [] };
+          const u = db.users.find((x) => x.userId === n.userId);
+          g.recipients.push({ userId: n.userId, name: u?.name ?? n.userId, role: n.recipientRole ?? (u ? ROLE_TEMPLATES[u.roles[0]]?.label : undefined), read: n.read, ackAt: n.ackAt, ackBy: n.ackBy });
+          for (const d of n.delivery ?? (n.channels ?? ['In-App']).map((ch) => ({ channel: ch, state: ch === 'In-App' ? 'Sent' : 'Queued' }))) {
+            const e = g.delivery.find((x) => x.channel === d.channel);
+            if (!e) g.delivery.push({ ...d }); else if (e.state !== d.state) e.state = 'Mixed';
+          }
+          groups.set(key, g);
+        }
+        const rescue = db.rescues.find((r) => r.rescueNo === ref);
+        return [...groups.values()].sort((a, b) => b.at.localeCompare(a.at)).map((g) => {
+          const ackAt = rescue?.urgentAckAt ?? g.recipients.find((r) => r.ackAt)?.ackAt; const ackBy = rescue?.urgentAckBy ?? g.recipients.find((r) => r.ackBy)?.ackBy;
+          const repeats = g.requiresAck && g.repeatMinutes ? Math.max(0, Math.floor((new Date(ackAt ?? nowIso()).getTime() - new Date(g.at).getTime()) / (g.repeatMinutes * 60_000))) : undefined;
+          return { ...g, ackAt: g.requiresAck ? ackAt : undefined, ackBy: g.requiresAck ? ackBy : undefined, ackByName: ackBy ? db.users.find((x) => x.userId === ackBy)?.name ?? ackBy : undefined, repeats };
+        });
       });
     },
     async counts() {
@@ -811,11 +880,18 @@ export const api = {
     },
     /** SCR-04: next auto-generated company code (peek — consumed only when the client is saved with it). */
     nextClientCode() { return `C-${String((db.seq.CL ?? 0) + 1).padStart(5, '0')}`; },
-    async addContact(code: string, p: { firstName: string; lastName: string; phone: string; email: string; isSignatory?: boolean; position?: string }) {
+    async addContact(code: string, p: { firstName: string; lastName: string; phone: string; email: string; isSignatory?: boolean; position?: string; signatoryEvidence?: import('../shared').ContactPerson['signatoryEvidence'] }) {
       requirePerm('clients.client', 'edit');
       return tx(() => {
         if (!p.firstName.trim() || !p.lastName.trim()) throw new ApiError('VALIDATION_FAILED', 'Contact first and last name are required.', 422);
-        const c = mustClient(code); const ct = { id: uid(), ...p }; c.contacts.push(ct);
+        // V1.4 row 42: an authorised signatory needs a valid ID (type + number) and a specimen signature (proposed rule, pending Delbros).
+        if (p.isSignatory) {
+          const e = p.signatoryEvidence; const errs: Record<string, string> = {};
+          if (!e?.idType) errs.idType = 'Required for a signatory'; if (!e?.idNumber?.trim()) errs.idNumber = 'Required for a signatory'; if (!e?.specimenFile) errs.specimenFile = 'Attach the specimen signature';
+          if (e?.idExpiry && e.idExpiry < manilaToday()) errs.idExpiry = 'The ID has expired';
+          if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'Complete the signatory identification and specimen signature.', 422, errs);
+        }
+        const c = mustClient(code); const ct = { id: uid(), ...p, signatoryEvidence: p.isSignatory ? { ...p.signatoryEvidence!, idNumber: p.signatoryEvidence!.idNumber.trim(), verifiedBy: me().userId, verifiedAt: nowIso() } : undefined }; c.contacts.push(ct);
         audit('client.contact_added', 'client', code, ct); return ct;
       });
     },
@@ -843,6 +919,12 @@ export const api = {
       return tx(() => {
         if (clientOf(f.clientCode)) throw new ApiError('DUPLICATE_KEY', `Company code ${f.clientCode} already exists.`, 409, { clientCode: 'Company code already exists' });
         if (f.clientCode === api.clients.nextClientCode()) nextNo('CL', 'C-', 5); // consume the auto-generated number
+        // V1.4 row 38: sales information required at registration only when the (proposed) setting says so.
+        if (S()['clt.sales_info_stage'] === 'registration') {
+          const errs: Record<string, string> = {};
+          if (!f.industry) errs.industry = 'Required at registration'; if (!f.leadSource) errs.leadSource = 'Required at registration'; if (!f.expectedUnits) errs.expectedUnits = 'Required at registration'; if (!f.contractInterest?.length) errs.contractInterest = 'Pick at least one';
+          if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'Sales information is required at registration (Admin → Settings → Client & Contract).', 422, errs);
+        }
         const dup = db.clients.find((c) => c.clientName.trim().toLowerCase() === f.clientName.trim().toLowerCase());
         const c: Client = {
           clientCode: f.clientCode, clientName: f.clientName, billingName: f.billingName, address1: f.address1, address2: f.address2, city: f.city || undefined, zipCode: f.zipCode || undefined, country: 'PHILIPPINES', billingCycle: 'Weekly',
@@ -905,6 +987,14 @@ export const api = {
       if (c.status !== 'Draft') throw new ApiError('INVALID_STATE', 'Only Draft clients can be submitted for accreditation.', 409);
       if (clientExtras(c).portalPending) throw new ApiError('INVALID_STATE', 'Approve the portal registration first (DBL-CLT-019), then submit for accreditation.', 409);
       if (db.accreditations.some((a) => a.clientCode === code && a.status.startsWith('Pending'))) throw new ApiError('INVALID_STATE', 'An accreditation is already in progress.', 409);
+      // V1.4 rows 38–39: stage rules for sales information and request details (proposed settings; default keeps both optional).
+      if (S()['clt.sales_info_stage'] === 'accreditation' && (!c.industry || !c.leadSource || !c.expectedUnits || !c.contractInterest?.length))
+        throw new ApiError('VALIDATION_FAILED', `Complete the sales information on ${c.clientName} (industry, lead source, expected units, contract types) before submitting for accreditation.`, 422);
+      if (S()['clt.request_details_stage'] === 'submission') {
+        const errs: Record<string, string> = {};
+        if (!bici.requestedLimit) errs.requestedLimit = 'Required at submission'; if (!bici.requestedTermDays) errs.requestedTermDays = 'Required at submission'; if (!bici.expectedUnits) errs.expectedUnits = 'Required at submission'; if (!(bici.requestedTypes as string[] | undefined)?.length) errs.requestedTypes = 'Pick at least one';
+        if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'The request details are required from the AE at submission.', 422, errs);
+      }
       const wf = startWorkflow('ACCREDITATION', `Accreditation — ${c.clientName}`, 'client', code, [
         { label: 'C&C investigation (BICI)', roles: ['CNC_OFFICER'] }, { label: 'Finance endorsement', roles: ['FINANCE_MANAGER'] }, { label: 'VP final sign-off', roles: ['VP'] },
       ], undefined, c.branchCode);
@@ -1289,7 +1379,7 @@ export const api = {
       ], amount);
       b.withdrawals.unshift({ id: uid(), amount, reason, refundable: p.refundable, workflowId: wf.id, status: 'Pending', requestedAt: nowIso(), earlyException: !p.contractEnded });
       b.status = 'Withdrawal Pending';
-      notify('cashbond.withdrawal', `Cash bond withdrawal requested`, `${clientName(b.clientCode)} · ₱${amount.toLocaleString('en-PH')}`, {});
+      notify('cashbond.withdrawal', `Cash bond withdrawal requested — ${b.id}`, `${clientName(b.clientCode)} · ₱${amount.toLocaleString('en-PH')} · ${reason.trim()}`, { link: `/cash-bonds?bond=${b.id}` }); // V1.4 row 31: record-linked
       audit('cashbond.withdrawal_requested', 'cashbond', b.id, { amount, earlyException: !p.contractEnded }, reason);
       persist();
       return structuredClone(b);
@@ -1403,6 +1493,38 @@ export const api = {
       return tx(() => {
         const a = db.assets.find((x) => x.assetId === id); if (!a) throw new ApiError('NOT_FOUND', `Asset ${id} not found.`, 404);
         return { asset: a, pmState: api.chassis.pmState(a), audit: db.audit.filter((e) => e.entityType === 'asset' && e.entityId === id), workflow: a.disposal ? db.workflows.find((w) => w.id === a.disposal!.workflowId) : undefined };
+      });
+    },
+    /** V1.4 row 50: issue a quantity of a tool to a user or department; never more than is on hand (quantity − outstanding issues). */
+    async issueTool(id: string, p: { issuedTo: string; qty: number; purpose?: string; conditionOut: string; dueBack?: string }) {
+      const u = me(); if (!u.grants?.['chassis.asset']?.some((x) => x === 'edit' || x === 'check')) requirePerm('chassis.asset', 'edit');
+      await delay();
+      return tx(() => {
+        const a = db.assets.find((x) => x.assetId === id); if (!a) throw new ApiError('NOT_FOUND', `Asset ${id} not found.`, 404);
+        if (['Retired', 'Disposed', 'Under Repair'].includes(a.status)) throw new ApiError('INVALID_STATE', `${id} is ${a.status} and cannot be issued.`, 409);
+        const out = (a.issues ?? []).reduce((s, i) => s + i.qty - i.returns.reduce((r, x) => r + x.qty, 0), 0); const onHand = (a.qty ?? 1) - out;
+        const errs: Record<string, string> = {};
+        if (!p.issuedTo) errs.issuedTo = 'Required'; if (!(p.qty >= 1)) errs.qty = 'At least 1'; else if (p.qty > onHand) errs.qty = `Only ${onHand} ${a.uom ?? 'unit'} on hand`; if (!p.conditionOut) errs.conditionOut = 'Required';
+        if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, errs);
+        const iss: import('../shared').ToolIssue = { id: `TI-${uid().slice(0, 6).toUpperCase()}`, issuedTo: p.issuedTo, qty: p.qty, issuedAt: nowIso(), issuedBy: u.userId, purpose: p.purpose?.trim() || undefined, conditionOut: p.conditionOut, dueBack: p.dueBack || undefined, returns: [] };
+        (a.issues ??= []).unshift(iss); if (a.status === 'Available') { a.status = 'In-Use'; a.statusSince = nowIso(); }
+        audit('asset.tool_issued', 'asset', id, iss); return a;
+      });
+    },
+    /** V1.4 row 50: record a full or partial return of an issue, with its condition. */
+    async returnTool(id: string, issueId: string, p: { qty: number; condition: string; notes?: string }) {
+      const u = me(); if (!u.grants?.['chassis.asset']?.some((x) => x === 'edit' || x === 'check')) requirePerm('chassis.asset', 'edit');
+      await delay();
+      return tx(() => {
+        const a = db.assets.find((x) => x.assetId === id); const i = a?.issues?.find((x) => x.id === issueId);
+        if (!a || !i) throw new ApiError('NOT_FOUND', 'Issue record not found.', 404);
+        const outstanding = i.qty - i.returns.reduce((r, x) => r + x.qty, 0);
+        if (!(p.qty >= 1) || p.qty > outstanding) throw new ApiError('VALIDATION_FAILED', `Return between 1 and ${outstanding}.`, 422, { qty: `1–${outstanding}` });
+        if (!p.condition) throw new ApiError('VALIDATION_FAILED', 'Record the condition on return.', 422, { condition: 'Required' });
+        i.returns.push({ qty: p.qty, at: nowIso(), by: u.userId, condition: p.condition, notes: p.notes?.trim() || undefined });
+        const stillOut = (a.issues ?? []).some((x) => x.qty - x.returns.reduce((r, y) => r + y.qty, 0) > 0);
+        if (!stillOut && a.status === 'In-Use') { a.status = 'Available'; a.statusSince = nowIso(); }
+        audit('asset.tool_returned', 'asset', id, { issueId, ...p }); return a;
       });
     },
     async saveAsset(a: import('../shared').Asset, isNew: boolean) {
@@ -1593,7 +1715,8 @@ export const api = {
       const from = c.status;
       Object.assign(c, { status: 'On Hire', statusSince: actual, currentClientCode: e.clientCode, currentContractNo: e.contractNo, currentGatePassNo: gpNo, allocation: undefined });
       // Job orders closed by R&M become Closed by EIR Out on departure.
-      db.jobOrders.filter((j) => j.chassisNo === c.chassisNo && j.status === 'Closed by R&M').forEach((j) => { j.status = 'Closed by EIR Out'; });
+      // V1.4 row 34: keep the departure (gate pass + EIR) on the job order so its closure, final cost and Debit Memo stay linked.
+      db.jobOrders.filter((j) => j.chassisNo === c.chassisNo && j.status === 'Closed by R&M').forEach((j) => { j.status = 'Closed by EIR Out'; j.eirOut = { gatePassNo: gpNo, eirNo, at: actual }; (j.history ??= []).push({ at: actual, by: me().userId, status: 'Closed by EIR Out', note: `Departed on ${gpNo} · ${eirNo}` }); });
       audit('gate.out', 'chassis', c.chassisNo, { status: 'On Hire', gatePassNo: gpNo }, undefined, { status: from });
       notify('gate.out.completed', `Chassis out: ${c.chassisNo}`, `${clientName(e.clientCode)} · ${gpNo}`, { branchCode: c.branchCode, clientCode: e.clientCode, aeUserId: clientOf(e.clientCode)?.aeAssigned, link: `/gate/eir?q=${eirNo}` });
       persist();
@@ -1796,6 +1919,10 @@ export const api = {
         contracts: db.contracts.filter((k) => k.clientCode === c.clientCode && k.status === 'Active').map((k) => ({ contractNo: k.contractNo, contractType: k.contractType, monetary: monetaryStatusOf(c.clientCode, k.contractNo),
           // Review 1.1: contract context for the New unit request dialog (term and the equipment types the contract is rated for).
           effectiveDate: k.effectiveDate, expiryDate: k.expiryDate, equipmentTypes: k.rates.filter((r) => r.dailyRate > 0).map((r) => r.equipmentType),
+          // Staff UI changes V1.4 (row 20, ALO-001): the effective rate per type and its source — the contract's rate snapshot,
+          // flagged as a custom rate when it differs from the rate-card template.
+          rates: k.rates.filter((r) => r.dailyRate > 0).map((r) => ({ equipmentType: r.equipmentType, dailyRate: r.dailyRate, templateRate: r.templateRate ?? db.rateCards?.find((x) => x.contractType === k.contractType && x.contractClass === k.class && x.equipmentType === r.equipmentType)?.dailyRate })),
+          contractClass: k.class,
           usage: contractUsageOf(k.contractNo) })) })).filter((c) => c.contracts.length)); // staff review 1.2: units used vs contracted
     },
     async allocate(input: { chassisNo: string; clientCode: string; contractNo: string; targetPickupDate: string; expectedReturn?: string; requestNo?: string; acknowledgeRegWarning?: boolean }) {
@@ -1888,6 +2015,13 @@ export const api = {
       if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, errs);
       assertGate(input.clientCode, 'EWA_CREATE');
       if (!db.contracts.some((k) => k.contractNo === input.contractNo && k.clientCode === input.clientCode && k.status === 'Active')) throw new ApiError('VALIDATION_FAILED', 'Select an active contract for this client.', 422, { contractNo: 'No active contract' });
+      // V1.4 (row 51): contracted-unit limit — on hire + allocated + still requested + this request vs contracted units.
+      // Proposed setting alo.contract_unit_limit: "warn" (default, today's behaviour) or "block"; pending Sales / Operations approval.
+      {
+        const u = contractUsageOf(input.contractNo);
+        if (S()['alo.contract_unit_limit'] === 'block' && u.total + input.qty > u.contracted)
+          throw new ApiError('CONTRACT_UNITS_EXCEEDED', `${input.contractNo}: ${u.onHire} on hire + ${u.allocated} allocated + ${u.requested} still requested + ${input.qty} on this request = ${u.total + input.qty}, above the ${u.contracted} contracted units. Amend the contract or reduce the quantity.`, 409, { qty: `Only ${Math.max(0, u.contracted - u.total)} unit(s) left on the contract` });
+      }
       return tx(() => {
         db.unitRequests ??= []; db.seq.UR = Math.max(db.seq.UR ?? 0, 31);
         const r = { reqNo: nextNo('UR', 'UR-', 6), ...input, expectedReturn: input.expectedReturn || undefined, contactName: input.contactName?.trim() || undefined, contactPhone: input.contactPhone?.trim() || undefined,
@@ -1953,11 +2087,16 @@ export const api = {
       return tx(() => db.parkFix.map((p) => {
         const days = Math.max(1, Math.ceil((new Date(p.parkOutAt ?? nowIso()).getTime() - new Date(p.parkInAt).getTime()) / 86400000));
         const displayStatus = p.billingStatus === 'Billed' ? 'Billed' : p.status === 'Released' ? 'Parked out' : 'Parked';
-        return { ...p, clientName: clientName(p.clientCode), days, amountToDate: round2(days * p.dailyRate), displayStatus, billingStatus: p.billingStatus ?? 'Unbilled', clientOwned: p.clientOwned ?? !db.chassis.some((c) => c.chassisNo === p.chassisNo), joStatus: p.joNo ? db.jobOrders.find((j) => j.joNo === p.joNo)?.status : undefined };
+        // V1.4 rows 23 / 54: stored charges once billed; otherwise the running estimate on the same rules. Row 53: last client = the
+        // client on this trailer's previous Park & Fix visit (proposed meaning, pending confirmation of the legacy field).
+        const charges = p.charges ? { ...p.charges, repairFinal: true } : parkFixBill(p, days);
+        const prev = db.parkFix.filter((x) => x.chassisNo === p.chassisNo && x.id !== p.id && x.parkInAt < p.parkInAt).sort((a, b) => b.parkInAt.localeCompare(a.parkInAt))[0];
+        const lastClient = prev ? { clientCode: prev.clientCode, clientName: clientName(prev.clientCode), parkOutAt: prev.parkOutAt, id: prev.id } : undefined;
+        return { ...p, clientName: clientName(p.clientCode), days, amountToDate: charges.due, charges, lastClient, displayStatus, billingStatus: p.billingStatus ?? 'Unbilled', clientOwned: p.clientOwned ?? !db.chassis.some((c) => c.chassisNo === p.chassisNo), joStatus: p.joNo ? db.jobOrders.find((j) => j.joNo === p.joNo)?.status : undefined };
         // Staff review 1.2: the status filter covers the park state (Parked / Parked out) and the billing state (Unbilled / Billed) separately.
       }).filter((p) => (!f.status || (f.status === 'Parked' ? p.status === 'Parked' : f.status === 'Parked out' ? p.status === 'Released' : p.billingStatus === f.status)) && (!f.branch || p.branchCode === f.branch) && (!f.client || p.clientCode === f.client)));
     },
-    async parkIn(p: { chassisNo: string; clientCode: string; branchCode: string; reason: 'Idle' | 'Awaiting Repair' | 'Client Request'; dailyRate: number; chassisType?: string; plateNo?: string; service?: 'Park only' | 'Park & Repair'; repairCategories?: RepairCategory[]; expectedParkOut?: string; rateOverrideReason?: string; gate?: import('../shared').ParkFixGate;
+    async parkIn(p: { chassisNo: string; clientCode: string; branchCode: string; reason: 'Idle' | 'Awaiting Repair' | 'Client Request'; dailyRate: number; chassisType?: string; plateNo?: string; service?: 'Park only' | 'Park & Repair' | 'Fix only'; repairCategories?: RepairCategory[]; expectedParkOut?: string; rateOverrideReason?: string; gate?: import('../shared').ParkFixGate;
       repairScope?: string; repairEstimate?: number; agreementRef?: string }) {
       requirePerm('alloc.parkfix', 'add');
       await delay();
@@ -1965,7 +2104,7 @@ export const api = {
       const errs: Record<string, string> = {};
       if (!no) errs.chassisNo = 'Required'; if (!p.clientCode) errs.clientCode = 'Required'; if (!p.plateNo?.trim()) errs.plateNo = 'Required'; if (!p.chassisType) errs.chassisType = 'Required';
       if (!g?.truckOrcr?.trim()) errs.truckOrcr = 'Required'; // staff review 1.2: Truck OR/CR, as on the Gate Out EIR
-      if (p.service === 'Park & Repair' && !p.repairScope?.trim()) errs.repairScope = 'Describe the repair the client asked for';
+      if ((p.service === 'Park & Repair' || p.service === 'Fix only') && !p.repairScope?.trim()) errs.repairScope = 'Describe the repair the client asked for';
       if (p.repairEstimate != null && p.repairEstimate < 0) errs.repairEstimate = 'Cannot be negative';
       if (!g?.trucker.trim()) errs.trucker = 'Required'; if (!g?.truckPlateNo.trim()) errs.truckPlateNo = 'Required'; if (!g?.driverName.trim()) errs.driverName = 'Required'; if (!g?.driverLicenseNo.trim()) errs.driverLicenseNo = 'Required';
       if (!g?.signature) errs.signature = 'Driver signature required';
@@ -1982,16 +2121,26 @@ export const api = {
       if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, errs);
       assertGate(p.clientCode, 'PARK_IN');
       return tx(() => {
-        db.seq.PFR = Math.max(db.seq.PFR ?? 0, 3); // seeded receipts use 1–3
+        db.seq.PFR = Math.max(db.seq.PFR ?? 0, 5); // seeded receipts use 1–5 (V1.4: PF-3 in 4, out 5)
         const id = nextNo('PF', 'PF-', 4); const inReceiptNo = nextNo('PFR', 'PFR-IN-', 6);
         let joNo: string | undefined;
-        if (p.service === 'Park & Repair') {
+        const repairs = p.service === 'Park & Repair' || p.service === 'Fix only'; // V1.4 row 24: Fix only = chargeable JO, no parking fee (proposed)
+        if (repairs) {
           joNo = nextNo('JO', `JO-${p.branchCode}-`, 6);
           db.jobOrders.unshift({ joNo, chassisNo: no, branchCode: p.branchCode, source: 'Spot Repair', sourceRef: id, categories: p.repairCategories?.length ? p.repairCategories : ['Mechanical'], notes: `Park & Fix repair for client-owned trailer ${no} (${clientName(p.clientCode)}). Chargeable to client.${p.repairScope?.trim() ? ` Scope: ${p.repairScope.trim()}.` : ''}${p.repairEstimate ? ` Estimate ₱${p.repairEstimate}.` : ''}`, workers: [], status: 'Draft', isMajor: false, chargeable: true, bom: [], labor: [], createdAt: nowIso(), createdBy: me().userId });
         }
-        const r: import('../shared').ParkFixRecord = { id, chassisNo: no, clientOwned: true, chassisType: p.chassisType, plateNo: p.plateNo?.trim().toUpperCase(), clientCode: p.clientCode, branchCode: p.branchCode, reason: p.service === 'Park & Repair' ? 'Awaiting Repair' : p.reason,
+        // V1.4 row 22: handling-in charge from configuration (proposed amount and timing, pending Finance).
+        const handlingIn = round2(Number(S()['alo.parkfix_handling_in'] ?? 0)); const handlingTiming = (S()['alo.parkfix_handling_timing'] === 'park_in' ? 'park_in' : 'park_out') as 'park_in' | 'park_out';
+        let handlingDmNo: string | undefined;
+        if (handlingIn > 0 && handlingTiming === 'park_in') {
+          const hc = parkFixCharges({ days: 0, dailyRate: 0, service: 'Fix only', handling: handlingIn, repair: 0, vatBasis: (S()['alo.parkfix_vat_basis'] ?? 'inclusive') as ParkFixVatBasis, vatPct: Number(S()['fin.vat_pct'] ?? 0.12) });
+          handlingDmNo = nextNo('DM', 'DM-', 6);
+          db.memos.unshift({ memoNo: handlingDmNo, type: 'Debit', clientCode: p.clientCode, referenceType: 'Park & Fix', referenceId: id, amount: hc.total, reason: `Park & Fix ${no} — handling-in charge ${handlingIn.toLocaleString('en-PH')} (VAT ${hc.vatBasis}, VAT ₱${hc.vat}) — billed at park-in (DBL-ALO-005, proposed)`, status: 'Posted', createdAt: nowIso() });
+        }
+        const r: import('../shared').ParkFixRecord = { id, chassisNo: no, clientOwned: true, chassisType: p.chassisType, plateNo: p.plateNo?.trim().toUpperCase(), clientCode: p.clientCode, branchCode: p.branchCode, reason: repairs ? 'Awaiting Repair' : p.reason,
+          handlingIn, handlingTiming, handlingDmNo,
           service: p.service ?? 'Park only', joNo, dailyRate: p.dailyRate, rateOverrideReason: p.dailyRate !== configured ? p.rateOverrideReason : undefined, expectedParkOut: p.expectedParkOut || undefined, parkInAt: nowIso(), status: 'Parked', inReceiptNo, billingStatus: 'Unbilled', reprintCount: 0, parkIn: { ...g!, by: me().userId },
-          repairScope: p.service === 'Park & Repair' ? p.repairScope?.trim() || undefined : undefined, repairEstimate: p.service === 'Park & Repair' && p.repairEstimate ? p.repairEstimate : undefined, agreementRef: p.agreementRef?.trim() || undefined };
+          repairScope: repairs ? p.repairScope?.trim() || undefined : undefined, repairEstimate: repairs && p.repairEstimate ? p.repairEstimate : undefined, agreementRef: p.agreementRef?.trim() || undefined };
         db.parkFix.unshift(r);
         audit('parkfix.in', 'parkfix', id, { chassisNo: no, inReceiptNo, joNo, dailyRate: p.dailyRate }, r.rateOverrideReason ? `Rate override: ${r.rateOverrideReason}` : undefined);
         return r;
@@ -2010,13 +2159,29 @@ export const api = {
       if (Object.keys(errs).length) throw new ApiError('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, errs);
       return tx(() => {
         r.parkOutAt = nowIso(); r.status = 'Released'; r.parkOut = { ...g!, by: me().userId };
-        const days = Math.max(1, Math.ceil((new Date(r.parkOutAt).getTime() - new Date(r.parkInAt).getTime()) / 86400000)); const amount = round2(days * r.dailyRate);
+        const days = Math.max(1, Math.ceil((new Date(r.parkOutAt).getTime() - new Date(r.parkInAt).getTime()) / 86400000));
+        // V1.4 rows 23 / 54: one itemized bill — Handling, Repair (closed JO actual cost), Park charge, VAT, Total — stored on the record and spelled out on the Debit Memo.
+        const { repairFinal: _rf, ...c } = parkFixBill(r, days); const amount = c.due;
+        r.charges = c;
         r.outReceiptNo = nextNo('PFR', 'PFR-OUT-', 6);
         const memoNo = nextNo('DM', 'DM-', 6);
-        db.memos.unshift({ memoNo, type: 'Debit', clientCode: r.clientCode, referenceType: 'Park & Fix', referenceId: r.id, amount, reason: `Park & Fix ${r.chassisNo} — ${days} day(s) × ₱${r.dailyRate} (DBL-ALO-005)`, status: 'Posted', createdAt: nowIso() });
+        const php = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+        db.memos.unshift({ memoNo, type: 'Debit', clientCode: r.clientCode, referenceType: 'Park & Fix', referenceId: r.id, joNo: r.joNo, amount,
+          reason: `Park & Fix ${r.chassisNo} (${r.service ?? 'Park only'}) — handling ${php(c.handling)}${r.handlingDmNo ? ` (billed at park-in on ${r.handlingDmNo})` : ''} + repair ${php(c.repair)} + park ${r.service === 'Fix only' ? 'none (Fix only)' : `${days} day(s) × ₱${r.dailyRate} = ${php(c.park)}`}; VAT ${c.vatBasis} ${php(c.vat)}; total ${php(c.total)}${c.interimBilled ? ` less interim ${php(c.interimBilled)}` : ''} (DBL-ALO-005)`, status: 'Posted', createdAt: nowIso() });
         r.billingStatus = 'Billed'; r.debitMemoNo = memoNo; r.billedAmount = amount;
-        audit('parkfix.out', 'parkfix', r.id, { outReceiptNo: r.outReceiptNo, days, amount, debitMemoNo: memoNo });
+        audit('parkfix.out', 'parkfix', r.id, { outReceiptNo: r.outReceiptNo, days, amount, debitMemoNo: memoNo, charges: c });
         return { ...r, days, amount };
+      });
+    },
+    /** V1.4 row 21: Deputy Yard Manager sign-off on the Park & Fix receipt (legacy receipt flow) — stored and printed on both receipts. */
+    async parkFixDymSignoff(id: string, note?: string) {
+      const u = requirePerm('alloc.parkfix', 'check');
+      await delay();
+      return tx(() => {
+        const r = db.parkFix.find((x) => x.id === id); if (!r) throw new ApiError('NOT_FOUND', 'Record not found.', 404);
+        if (r.dymSignoff) throw new ApiError('INVALID_STATE', `Already signed off by ${db.users.find((x) => x.userId === r.dymSignoff!.by)?.name ?? r.dymSignoff.by}.`, 409);
+        r.dymSignoff = { by: u.userId, at: nowIso(), note: note?.trim() || undefined };
+        audit('parkfix.dym_signoff', 'parkfix', id, { by: u.userId }); return r;
       });
     },
     async reprintParkReceipt(id: string, which: 'in' | 'out') {
@@ -2165,6 +2330,7 @@ export const api = {
           ...(j.approvedBy ? [{ by: j.approvedBy, status: 'Approved' }] : []), ...(j.confirmedBy ? [{ by: j.confirmedBy, status: 'Confirmed' }] : []),
           ...(j.labor.length || ['Ongoing', 'On Hold'].includes(j.status) || j.closedAt ? [{ at: j.labor.map((l) => l.date).sort()[0], status: 'Ongoing', note: 'Work started' }] : []),
           ...(j.status === 'On Hold' ? [{ status: 'On Hold', note: j.holdReason }] : []), ...(j.closedAt ? [{ at: j.closedAt, status: 'Closed by R&M' }] : []),
+          ...(j.eirOut ? [{ at: j.eirOut.at, status: 'Closed by EIR Out', note: `Departed on ${j.eirOut.gatePassNo} · ${j.eirOut.eirNo}` }] : []),
         ];
         const cc = j.chargeClientCode ?? (j.chargeable ? db.chassis.find((c) => c.chassisNo === j.chassisNo)?.currentClientCode : undefined);
         return { jo: j, history, daysOpen: daysBetween(j.createdAt, j.closedAt ?? nowIso()), chargeClient: cc ? { clientCode: cc, clientName: clientName(cc) } : undefined,
@@ -2217,6 +2383,34 @@ export const api = {
       if (action === 'close-rm') { j.status = 'Closed by R&M'; j.closedAt = nowIso(); }
       audit(`jo.${action}`, 'jo', no, { status: j.status }); persist();
       return structuredClone(j);
+    },
+    /** V1.4 row 32 (ALO-004): close one repair system on the job order (who / when). */
+    async closeSystem(no: string, system: RepairCategory) {
+      requirePerm('repair.jo', 'edit'); await delay();
+      return tx(() => {
+        const j = db.jobOrders.find((x) => x.joNo === no); if (!j) throw new ApiError('NOT_FOUND', 'Job order not found', 404);
+        if (!['Ongoing', 'On Hold'].includes(j.status)) throw new ApiError('INVALID_STATE', `Repair systems are closed while the job order is Ongoing (now ${j.status}).`, 409);
+        if (!j.categories.includes(system)) throw new ApiError('VALIDATION_FAILED', `${system} is not on this job order.`, 422);
+        j.systemsClosed ??= [];
+        if (j.systemsClosed.some((s) => s.system === system)) throw new ApiError('INVALID_STATE', `${system} is already closed.`, 409);
+        j.systemsClosed.push({ system, at: nowIso(), by: me().userId });
+        (j.history ??= []).push({ at: nowIso(), by: me().userId, status: 'Ongoing', note: `${system} repair closed` });
+        audit('jo.system_closed', 'jo', no, { system }); return structuredClone(j);
+      });
+    },
+    /** V1.4 rows 32–33: Close by R&M with the after-repair photos; under the per-system rule every repair system must be closed first. */
+    async closeByRm(no: string, afterPhotos: string[]) {
+      requirePerm('repair.jo', 'edit'); await delay();
+      const j = db.jobOrders.find((x) => x.joNo === no); if (!j) throw new ApiError('NOT_FOUND', 'Job order not found', 404);
+      if (j.status !== 'Ongoing') throw new ApiError('INVALID_STATE', `Cannot close a job order in ${j.status}.`, 409);
+      const open = j.categories.filter((s) => !j.systemsClosed?.some((x) => x.system === s));
+      if (S()['rm.closure_rule'] !== 'per_jo' && open.length) throw new ApiError('SYSTEMS_OPEN', `Close each repair system first: ${open.join(', ')} still open (rule: per repair system — pending confirmation).`, 409, { systems: open.join(', ') });
+      const photoRequired = String(S()['rm.after_photo_required'] ?? 'true') !== 'false';
+      if (photoRequired && !afterPhotos.length) throw new ApiError('VALIDATION_FAILED', 'Attach at least one after-repair photo.', 422, { afterPhotos: 'At least one after-repair photo' });
+      j.afterPhotos = [...(j.afterPhotos ?? []), ...afterPhotos];
+      if (S()['rm.closure_rule'] === 'per_jo') { j.systemsClosed ??= []; for (const s of open) j.systemsClosed.push({ system: s, at: nowIso(), by: me().userId }); }
+      const out = await api.repair.transition(no, 'close-rm');
+      return out;
     },
     async addBom(no: string, lines: { partCode: string; qty: number }[], warehouseCode: string) {
       requirePerm('repair.bom', 'add');
@@ -2341,7 +2535,7 @@ export const api = {
         const needsRecount = variance != null && Math.abs(variance) >= recount;
         // Low-stock flag uses the lower of system and last counted quantity, so a short count is never reported as OK.
         const effectiveQty = Math.min(s.qtyOnHand, s.lastPhysicalCount ?? s.qtyOnHand);
-        const low = effectiveQty <= p.lowStockThreshold;
+        const low = isLowStock(s); // V1.4 row 15: shared rule (also used by the Dashboard / Executive / Procurement counts)
         const countDue = !s.lastCountDate || (Date.now() - new Date(s.lastCountDate).getTime()) / 86_400_000 > cycle;
         const requestedQty = db.stockTxns.filter((t) => t.type === 'Request' && t.status === 'Open' && t.partCode === s.partCode && t.toWarehouse === s.warehouseCode).reduce((a, t) => a + Math.abs(t.qty), 0);
         return {
@@ -2485,7 +2679,11 @@ export const api = {
   // ── Procurement (M09) ────────────────────────────────────────────────────
   procurement: {
     async overview() {
-      requirePerm('prc.pr');
+      // V1.4 row 12: PR, PO or RR viewers may open Procurement; each list is returned only with its own view permission
+      // (a Stockroom Custodian sees POs to receive and receiving reports, never PRs or their approvals).
+      const pu = me(); const pv = (r: string) => !!pu.grants?.[r]?.includes('view');
+      if (!pv('prc.pr') && !pv('prc.po') && !pv('prc.rr')) requirePerm('prc.pr');
+      const seePr = pv('prc.pr'), seePo = pv('prc.po') || pv('prc.rr'), seePay = pv('prc.payment') || pv('prc.pr');
       const wfInfo = (id?: string) => {
         const w = db.workflows.find((x) => x.id === id); const s = w?.status === 'Pending' ? w.steps[w.currentStep] : undefined;
         return { workflow: w, currentStep: s?.label, pendingApprovers: s ? db.users.filter((u) => u.realm === 'INTERNAL' && u.roles.some((r) => s.roles.includes(r))).map((u) => u.name) : [], escalated: !!s?.dueAt && new Date(s.dueAt) < new Date(), dueAt: s?.dueAt,
@@ -2493,13 +2691,13 @@ export const api = {
           stepNo: s ? w!.currentStep + 1 : undefined, stepCount: s ? w!.steps.length : undefined, waitingSince: s ? (w!.currentStep > 0 ? w!.steps[w!.currentStep - 1]?.decidedAt : undefined) ?? w!.requestedAt : undefined };
       };
       return tx(() => ({
-        prs: db.prs.map((p) => ({ ...p, total: p.lines.reduce((a, l) => a + l.qty * l.estUnitCost, 0), itemCount: p.lines.length, supplierName: db.vendors.find((v) => v.vendorId === (p.supplierId ?? p.lines[0]?.supplierId))?.name, requesterName: db.users.find((u) => u.userId === p.requestedBy)?.name, ...wfInfo(p.workflowId) })),
-        pos: db.pos.map((p) => { const t = api.procurement.tally(p.poNo); const rrs = db.rrs.filter((r) => r.poNo === p.poNo); return { ...p, total: t.ordered, vendorName: db.vendors.find((v) => v.vendorId === p.vendorId)?.name, invoices: db.vendorInvoices.filter((i) => i.poNo === p.poNo), qtyOrdered: p.lines.reduce((a, l) => a + l.qty, 0), qtyDelivered: p.lines.reduce((a, l) => a + l.qtyReceived, 0), invoiced: t.invoiced, received: t.received, rrCount: rrs.length, matchStatus: t.matched ? 'Matched' : !rrs.length ? 'Awaiting RR' : !t.invoiced ? 'Awaiting invoice' : 'Variance' }; }),
+        prs: db.prs.filter(() => seePr).map((p) => ({ ...p, total: p.lines.reduce((a, l) => a + l.qty * l.estUnitCost, 0), itemCount: p.lines.length, supplierName: db.vendors.find((v) => v.vendorId === (p.supplierId ?? p.lines[0]?.supplierId))?.name, requesterName: db.users.find((u) => u.userId === p.requestedBy)?.name, ...wfInfo(p.workflowId) })),
+        pos: db.pos.filter(() => seePo).map((p) => { const t = api.procurement.tally(p.poNo); const rrs = db.rrs.filter((r) => r.poNo === p.poNo); return { ...p, total: t.ordered, vendorName: db.vendors.find((v) => v.vendorId === p.vendorId)?.name, invoices: db.vendorInvoices.filter((i) => i.poNo === p.poNo), qtyOrdered: p.lines.reduce((a, l) => a + l.qty, 0), qtyDelivered: p.lines.reduce((a, l) => a + l.qtyReceived, 0), invoiced: t.invoiced, received: t.received, rrCount: rrs.length, matchStatus: t.matched ? 'Matched' : !rrs.length ? 'Awaiting RR' : !t.invoiced ? 'Awaiting invoice' : 'Variance' }; }),
         rrs: db.rrs.map((r) => { const po = db.pos.find((p) => p.poNo === r.poNo); return { ...r, itemsReceived: r.lines.filter((l) => l.qtyReceived > 0).length, qtyReceived: r.lines.reduce((a, l) => a + l.qtyReceived, 0), qtyRejected: r.lines.reduce((a, l) => a + l.qtyRejected, 0), qtyVariance: po ? po.lines.reduce((a, l) => a + (l.qtyReceived - l.qty), 0) : 0 }; }),
-        payments: db.paymentRequests.map((p) => ({ ...p, fundingSource: p.fundingSource ?? (p.type === 'PCV' ? 'Petty Cash Fund' : 'Disbursement (check / bank transfer)'), ...wfInfo(p.workflowId) })),
-        vendorInvoices: db.vendorInvoices.map((i) => { const t = db.pos.some((p) => p.poNo === i.poNo) ? api.procurement.tally(i.poNo) : undefined; const rr = db.rrs.some((r) => r.poNo === i.poNo); const matchStatus = !t ? 'No PO' : t.matched ? 'Matched' : !rr ? 'No RR yet' : 'Variance'; return { ...i, matchStatus, paymentHeld: matchStatus !== 'Matched' && i.status !== 'Rejected' }; }),
+        payments: db.paymentRequests.filter(() => seePay).map((p) => ({ ...p, fundingSource: p.fundingSource ?? (p.type === 'PCV' ? 'Petty Cash Fund' : 'Disbursement (check / bank transfer)'), ...wfInfo(p.workflowId) })),
+        vendorInvoices: db.vendorInvoices.filter(() => seePo || seePay).map((i) => { const t = db.pos.some((p) => p.poNo === i.poNo) ? api.procurement.tally(i.poNo) : undefined; const rr = db.rrs.some((r) => r.poNo === i.poNo); const matchStatus = !t ? 'No PO' : t.matched ? 'Matched' : !rr ? 'No RR yet' : 'Variance'; return { ...i, matchStatus, paymentHeld: matchStatus !== 'Matched' && i.status !== 'Rejected' }; }),
         vendors: db.vendors,
-        lowStock: db.stock.filter((s) => s.qtyOnHand <= (db.parts.find((p) => p.partCode === s.partCode)?.lowStockThreshold ?? 0)).map((s) => ({ ...s, ref: `Low stock · ${s.partCode} @ ${s.warehouseCode}` })),
+        lowStock: db.stock.filter((s) => isLowStock(s)).map((s) => ({ ...s, ref: `Low stock · ${s.partCode} @ ${s.warehouseCode}` })),
         stockRequests: db.stockTxns.filter((t) => t.type === 'Request').map((t) => ({ txnNo: t.txnNo, partCode: t.partCode, qty: t.qty, warehouseCode: t.fromWarehouse })),
         openJos: db.jobOrders.filter((j) => !j.status.startsWith('Closed')).map((j) => ({ joNo: j.joNo, chassisNo: j.chassisNo, status: j.status })),
         // Staff review 1.2: chassis and non-chassis assets a PR can be raised for.
@@ -3145,7 +3343,7 @@ export const api = {
             clientCode: c.clientCode, clientName: c.clientName, status: c.status, branchCode: c.branchCode, ae: c.aeAssigned, ...a,
             classification: c.isLegal ? 'Legal' : c.isCollectionAgency ? 'Collection agency' : 'Regular',
             stage: cc?.stage ?? 'None', nextActionDue: cc?.nextActionDue, actionOverdueDays: cc?.nextActionDue && cc.nextActionDue < today ? daysBetween(`${cc.nextActionDue}T00:00:00.000Z`, nowIso()) : 0,
-            lastSoaSentAt: cc?.soaSends?.[0]?.at, acknowledgedAt: cc?.acknowledgedAt, history: cc?.actions ?? [], sends: cc?.soaSends ?? [], pendingDemand: !!cc?.pendingWorkflowId,
+            lastSoaSentAt: cc?.soaSends?.[0]?.at, acknowledgedAt: cc?.acknowledgedAt, history: cc?.actions ?? [], sends: cc?.soaSends ?? [], pendingDemand: !!cc?.pendingWorkflowId, demandLetter: cc?.demandLetter,
             liftTier: c.status === 'Hold' ? holdLiftTier(a.total, t1, t2).label : undefined,
             // Review 1.2: exposure context and the collection follow-up (owner, last contact, promise to pay).
             creditLimit: c.creditLimit, creditTermDays: (db.contracts.find((k) => k.clientCode === c.clientCode && k.status === 'Active') ?? db.contracts.find((k) => k.clientCode === c.clientCode))?.creditTermDays,
@@ -3191,14 +3389,32 @@ export const api = {
       return { ...structuredClone(r), pendingApproval: false };
     },
     // DBL-CNC-005 send SOA by email / courier with a send log
-    async sendSoa(code: string, input: { channel: 'Email' | 'Courier'; to: string; trackingNo?: string }) {
+    /** V1.4 rows 48–49: record the courier result of an SOA or the final demand letter (delivered / returned, date, received by, proof). */
+    async recordDelivery(code: string, target: { kind: 'soa'; id: string } | { kind: 'demand' }, d: { status: 'Delivered' | 'Returned'; at: string; receivedBy?: string; podFile?: string; notes?: string }) {
+      requirePerm('cnc.aging', 'edit');
+      return tx(() => {
+        const cc = db.collections.find((x) => x.clientCode === code); if (!cc) throw new ApiError('NOT_FOUND', 'No collection record for this client.', 404);
+        if (!d.at) throw new ApiError('VALIDATION_FAILED', 'Enter the delivery date.', 422, { at: 'Required' });
+        if (d.status === 'Delivered' && !d.receivedBy?.trim()) throw new ApiError('VALIDATION_FAILED', 'Enter who received it.', 422, { receivedBy: 'Required when delivered' });
+        const res = { status: d.status, at: d.at, receivedBy: d.receivedBy?.trim() || undefined, podFile: d.podFile || undefined, notes: d.notes?.trim() || undefined, recordedBy: me().userId };
+        let what: string;
+        if (target.kind === 'soa') { const s = cc.soaSends?.find((x) => x.id === target.id); if (!s) throw new ApiError('NOT_FOUND', 'SOA send not found.', 404); if (s.channel !== 'Courier') throw new ApiError('INVALID_STATE', 'Delivery results are recorded for courier sends.', 409); s.delivery = res; what = `SOA ${s.soaNo}`; }
+        else { if (!cc.demandLetter) throw new ApiError('NOT_FOUND', 'No demand letter issued.', 404); cc.demandLetter.delivery = res; what = `Demand letter ${cc.demandLetter.letterRef}`; }
+        cc.actions.unshift({ at: nowIso(), action: `${what} — ${d.status.toLowerCase()}${res.receivedBy ? ` (received by ${res.receivedBy})` : ''}`, by: me().userId, notes: res.notes });
+        audit('collection.delivery_recorded', 'client', code, { target, ...res }); return cc;
+      });
+    },
+    async sendSoa(code: string, input: { channel: 'Email' | 'Courier'; to: string; trackingNo?: string; courier?: string; recipientName?: string }) {
       requirePerm('cnc.aging', 'edit');
       return tx(() => {
         mustClient(code);
         if (!input.to.trim()) throw new ApiError('VALIDATION_FAILED', input.channel === 'Email' ? 'Recipient email is required.' : 'Courier address is required.', 422, { to: 'Required' });
         let cc = db.collections.find((x) => x.clientCode === code);
         if (!cc) { cc = { clientCode: code, stage: 'None', actions: [] }; db.collections.push(cc); }
-        const send = { id: uid(), soaNo: nextNo('SOA', `SOA-${new Date().getFullYear()}-`, 5), at: nowIso(), by: me().userId, channel: input.channel, to: input.to.trim(), trackingNo: input.trackingNo?.trim() || undefined };
+        if (input.channel === 'Courier' && !input.courier?.trim()) throw new ApiError('VALIDATION_FAILED', 'Select the courier.', 422, { courier: 'Required for courier delivery' });
+        const send: import('../shared').SoaSend = { id: uid(), soaNo: nextNo('SOA', `SOA-${new Date().getFullYear()}-`, 5), at: nowIso(), by: me().userId, channel: input.channel, to: input.to.trim(), trackingNo: input.trackingNo?.trim() || undefined,
+          // V1.4 row 48 (CNC-005): courier company, named recipient and the delivery result (In transit until recorded).
+          courier: input.channel === 'Courier' ? input.courier?.trim() : undefined, recipientName: input.recipientName?.trim() || undefined, delivery: input.channel === 'Courier' ? { status: 'In transit' } : undefined };
         (cc.soaSends ??= []).unshift(send); cc.acknowledgedAt = undefined;
         if (cc.stage === 'None') collectionAdvance(code, `SOA ${send.soaNo} sent by ${send.channel.toLowerCase()} to ${send.to}`);
         else cc.actions.unshift({ at: nowIso(), action: `SOA re-sent (${send.channel})`, by: me().userId, notes: send.to });
@@ -3595,7 +3811,7 @@ export const api = {
         const collected = (a: string, b: string) => round2(db.receipts.filter((r) => isCollected(r) && inP(r.date, a, b) && (!f.branch && !f.region || r.applications.some((x) => invs.some((i) => i.invoiceNo === x.invoiceNo)))).reduce((s, r) => s + r.amount, 0));
         const pct = (cur: number, prev: number) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : undefined);
         const partner = chassis.filter((c) => c.owner !== 'DELWATER').length;
-        const low = db.stock.filter((s) => s.qtyOnHand <= (db.parts.find((p) => p.partCode === s.partCode)?.lowStockThreshold ?? 0)).length;
+        const low = db.stock.filter((s) => isLowStock(s)).length; // V1.4 row 15: same rule as Inventory
         const onHireUnits = chassis.filter((c) => c.status === 'On Hire');
         const rescues = db.rescues.filter((r) => brOk(r.branchCode));
         const responded = rescues.filter((r) => r.dispatchedAt);
@@ -3754,8 +3970,20 @@ export const api = {
           rows: db.memos.filter((m) => m.type === 'Debit').map((m) => ({ memoNo: m.memoNo, client: cn(m.clientCode), invoice: m.referenceInvoiceNo, ref: `${m.referenceType} ${m.referenceId ?? ''}`, amount: m.amount, reason: m.reason, status: m.status, created: m.createdAt.slice(0, 10), _date: m.createdAt, _client: m.clientCode })) }),
         ewl: () => ({ cols: [c('id', 'Txn'), c('at', 'Date'), c('client', 'Client'), c('type', 'Type'), c('amount', 'Amount', 'money'), c('balance', 'Balance after', 'money'), c('ref', 'Reference')],
           rows: db.ewalletTxns.map((t) => ({ id: t.id, at: t.at.slice(0, 10), client: cn(t.clientCode), type: t.type, amount: t.amount, balance: t.balanceAfter, ref: `${t.referenceType} ${t.referenceId ?? ''}`, _date: t.at, _client: t.clientCode })) }),
-        cashbond: () => ({ cols: [c('id', 'Ref'), c('client', 'Client'), c('contract', 'Contract'), c('amount', 'Amount', 'money'), c('received', 'Received'), c('receipt', 'Receipt'), c('status', 'Status')],
-          rows: db.cashBonds.map((b) => ({ id: b.id, client: cn(b.clientCode), contract: b.contractNo, amount: b.amount, received: b.dateReceived, receipt: b.receiptRef, status: b.status, _date: b.dateReceived, _client: b.clientCode })) }),
+        // V1.4 row 47: held / withdrawal / refunded detail per bond, and the ledger balance it reconciles to (received − refunded = balance).
+        cashbond: () => ({ cols: [c('id', 'Ref'), c('client', 'Client'), c('contract', 'Contract'), c('amount', 'Received amount', 'money'), c('received', 'Received'), c('receipt', 'Receipt'), c('status', 'Status', 'filter'),
+          c('withdrawal', 'Withdrawal (requested · reason · stage)'), c('refund', 'Refund (date · reference · method)'), c('refunded', 'Refunded', 'money'), c('held', 'Held balance', 'money'), c('reconciles', 'Ledger check')],
+          rows: db.cashBonds.map((b) => {
+            const w = b.withdrawals[0]; const refunded = round2(b.withdrawals.filter((x) => x.status === 'Refunded').reduce((a, x) => a + x.amount, 0)); const bal = bondBalance(b);
+            const wf = w ? db.workflows.find((x) => x.id === w.workflowId) : undefined; const stage = w?.status === 'Pending' && wf ? `Pending ${wf.steps[wf.currentStep]?.label ?? ''}` : w?.status;
+            const held = b.status === 'Applied' || b.status === 'Refunded' ? 0 : bal;
+            return { id: b.id, client: cn(b.clientCode), contract: b.contractNo, amount: b.amount, received: b.dateReceived, receipt: b.receiptRef, status: b.status,
+              withdrawal: w ? `₱${w.amount.toLocaleString('en-PH')} · ${w.reason} · ${stage}` : b.status === 'Applied' ? `Applied — ${b.notes ?? 'to the final bill'}` : '—',
+              refund: b.withdrawals.filter((x) => x.refund).map((x) => `${x.refund!.date} · ${x.refund!.reference} · ${x.refund!.method}`).join('; ') || '—',
+              refunded, held, reconciles: (() => { const applied = b.status === 'Applied' ? bal : 0; const ok = round2(b.amount - refunded - applied) === held;
+                return ok ? `OK — ₱${b.amount.toLocaleString('en-PH')} received − ₱${refunded.toLocaleString('en-PH')} refunded${applied ? ` − ₱${applied.toLocaleString('en-PH')} applied to the final bill` : ''} = ₱${held.toLocaleString('en-PH')} held` : 'Check ledger'; })(),
+              _date: b.dateReceived, _client: b.clientCode };
+          }) }),
         ap: () => ({ cols: [c('doc', 'Document'), c('kind', 'Kind'), c('payee', 'Payee / vendor'), c('ref', 'Reference'), c('amount', 'Amount', 'money'), c('due', 'Due / invoice date'), c('status', 'Status')],
           rows: [...db.paymentRequests.map((p) => ({ doc: p.docNo, kind: p.type, payee: p.payee, ref: `${p.referenceType} ${p.referenceId}`, amount: p.amount, due: p.dueDate || '—', status: p.status, _date: p.createdAt })),
             ...db.vendorInvoices.map((v) => ({ doc: v.invoiceNo, kind: 'Vendor invoice', payee: db.vendors.find((x) => x.vendorId === v.vendorId)?.name, ref: `PO ${v.poNo}`, amount: v.amount, due: v.invoiceDate, status: v.status, _date: v.invoiceDate }))] }),

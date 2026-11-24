@@ -83,8 +83,13 @@ export function notify(eventType: string, title: string, body: string, opts: { l
     if (rule.includeClient && opts.clientCode) db.users.filter((u) => u.clientCode === opts.clientCode).forEach((u) => recipients.add(u.userId));
   }
   const at = new Date().toISOString();
+  // V1.4 rows 30–31: keep the rule, channels and per-channel delivery state with every notice, so a record can show what was sent to whom.
+  const channels = rule?.channels ?? ['In-App'];
   for (const userId of recipients) {
-    db.notifications.unshift({ id: uid(), at, title, body, link: opts.link, read: false, requiresAck: rule?.mode === 'Repeat until ack', userId });
+    const u = db.users.find((x) => x.userId === userId);
+    db.notifications.unshift({ id: uid(), at, title, body, link: opts.link, read: false, requiresAck: rule?.mode === 'Repeat until ack', userId,
+      ruleId: rule?.id, channels, category: 'Operations', recipientRole: u?.roles.find((r) => rule?.recipientRoles.includes(r)) ?? (u?.realm !== 'INTERNAL' ? 'Client' : undefined),
+      delivery: channels.map((ch) => ({ channel: ch, state: ch === 'In-App' ? 'Sent' : 'Queued', at: ch === 'In-App' ? at : undefined })) });
   }
 }
 

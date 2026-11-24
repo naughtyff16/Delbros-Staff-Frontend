@@ -325,8 +325,20 @@ export function LateEncodingPage() {
                 {sel.path === 'AUTO' ? <li><span className="font-medium">Billing auto-corrected</span> · system · {formatDateTime(sel.createdAt)}</li>
                   : sel.workflow?.steps.map((s) => <li key={s.step}><span className="font-medium">{s.label}</span> · {s.decision}{s.decidedAt ? ` · ${userName(s.decidedBy)} · ${formatDateTime(s.decidedAt)}` : s.dueAt ? ` · due ${formatDateTime(s.dueAt)}${new Date(s.dueAt) < new Date() && sel.workflow?.status === 'Pending' && sel.workflow.steps[sel.workflow.currentStep]?.step === s.step ? ' (overdue — escalated)' : ''}` : ''}</li>)}
               </ul></Card>
-            {sel.path === 'CREDIT_MEMO' && <Card><CardHeader title="Held invoice lines" description="Released when the credit memo is approved; stay held for C&C review if rejected (pending confirmation)." />
+            {sel.path === 'CREDIT_MEMO' && sel.status !== 'Approved' && <Card><CardHeader title="Held invoice lines" description="Released when the credit memo is approved; stay held for C&C review if rejected (pending confirmation)." />
               {sel.heldLines.length ? <ul className="text-sm">{sel.heldLines.map((l) => <li key={l.lineId} className="flex justify-between"><span>{l.invoiceNo} · {l.description}</span><span className="tabular">{formatPhp(l.amount)}</span></li>)}</ul> : <p className="text-sm text-muted">No invoice lines currently held for this chassis.</p>}</Card>}
+            {/* Staff UI changes V1.4 (row 19): the final state of an approved Credit Memo correction — memo, released invoice lines and the date billing now uses. */}
+            {sel.path === 'CREDIT_MEMO' && sel.status === 'Approved' && <Card><CardHeader title="Final state — correction applied" description="After DYM and Treasury approval: the Credit Memo, the invoice lines it released and the date billing now uses stay linked to this record." />
+              <KeyValueGrid cols={2} items={[
+                { label: 'Credit memo', value: sel.memoNo ? <Link className="font-mono text-brand-700 hover:underline" to={`/billing/memos?memo=${sel.memoNo}`}>{sel.memoNo}</Link> : '—' },
+                { label: 'Memo status / amount', value: `${sel.memoStatus ?? '—'}${sel.memoAmount != null ? ` · ${formatPhp(sel.memoAmount)}` : ''}` },
+                { label: 'Approved (Treasury, final step)', value: sel.approvedAt ? formatDateTime(sel.approvedAt) : '—' },
+                { label: 'Billing now uses', value: `${formatDateTime(sel.correctedDate)} (actual ${sel.direction === 'OUT' ? 'gate-out' : 'gate-in'}; was ${formatDateTime(sel.originalDate)})` },
+              ]} />
+              <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Invoice lines released by this memo</p>
+              {sel.releasedLines?.length ? <ul className="divide-y divide-line rounded-lg border border-line text-sm">{sel.releasedLines.map((l) => <li key={l.lineId} className="flex justify-between gap-2 px-3 py-1.5"><span><Link className="font-mono text-brand-700 hover:underline" to={`/billing/invoices/${l.invoiceNo}`}>{l.invoiceNo}</Link> · {l.description}{l.days ? ` · ${l.days} days` : ''}</span><span className="tabular">{formatPhp(l.amount)}</span></li>)}</ul>
+                : <p className="text-sm text-muted">No invoice line was held for this unit when the memo was approved.</p>}
+            </Card>}
             {sel.workflow && <Card><CardHeader title="Approvals" description="DYM then Treasury; escalates after 48 h." /><ApprovalTimeline workflow={sel.workflow} userName={userName} /></Card>}
           </Stack>
         </Drawer>

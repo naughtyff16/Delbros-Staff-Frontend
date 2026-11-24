@@ -134,7 +134,8 @@ export const INDUSTRIES = ['Trucking', 'Freight forwarding', 'Shipping line', 'L
 export const LEAD_SOURCES = ['AE prospecting', 'Referral', 'Walk-in / inquiry', 'Portal registration', 'Existing client group', 'Other'];
 export function ClientRegisterPage() {
   const { user } = useAuth();
-  const { branchOptions, ref } = useRefLookups();
+  const { branchOptions, ref, setting: rsSetting } = useRefLookups();
+  const salesStage = String(rsSetting('clt.sales_info_stage') ?? 'optional'); // V1.4 row 38
   const nav = useNavigate();
   const autoCode = useMemo(() => api.clients.nextClientCode(), []);
   // Review 1.2: the AE's branch is shown with the name.
@@ -223,7 +224,8 @@ export function ClientRegisterPage() {
             </FormGrid>
             <Checkbox className="mt-4" label="This contact is also an authorised signatory" description="Can sign lease contracts for the client (more signatories can be added on the profile)." {...f.register('isSignatory')} />
           </FormSection>
-          <FormSection title="Sales information (optional)" description="Helps the Sales Director and C&C. Whether these are required at registration or only at accreditation is pending confirmation.">
+          {/* V1.4 row 38: the section follows the proposed stage setting (Admin → Settings → Client & Contract). */}
+          <FormSection title={`Sales information (${salesStage === 'registration' ? 'required' : 'optional'})`} description={`Helps the Sales Director and C&C. Current rule: ${salesStage === 'registration' ? 'required at registration' : salesStage === 'accreditation' ? 'optional now, required before the client is submitted for accreditation' : 'optional at registration and accreditation'} — the stage is pending Sales / C&C confirmation.`}>
             <FormGrid>
               <Select label="Client type / industry" {...f.register('industry')} placeholder="Select" options={INDUSTRIES.map((x) => ({ value: x, label: x }))} />
               <Select label="Lead source" {...f.register('leadSource')} placeholder="Select" options={LEAD_SOURCES.map((x) => ({ value: x, label: x }))} />
@@ -324,7 +326,11 @@ export function ClientProfilePage() {
       {tab === 'contacts' && (
         <Card padded={false}>
           <div className="flex items-center justify-between px-4 py-3"><p className="text-sm text-muted">Authorised contacts; signatories appear on the contract form.</p>{can('clients.client', 'edit') && <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setContactOpen(true)}>Add contact</Button>}</div>
-          <DataTable data={c.contacts} searchable={false} columns={[{ id: 'n', header: 'Name', cell: (x) => `${x.row.original.firstName} ${x.row.original.lastName}` }, { accessorKey: 'position', header: 'Position', cell: (x) => x.getValue<string>() ?? '—' }, { accessorKey: 'phone', header: 'Phone' }, { accessorKey: 'email', header: 'Email' }, { id: 'f', header: 'Flags', cell: (x) => <div className="flex gap-1">{x.row.original.isPrimary && <Badge tone="brand" dot={false}>Primary</Badge>}{x.row.original.isSignatory && <Badge tone="neutral" dot={false}>Signatory</Badge>}{(x.row.original.isBilling || (x.row.original.isPrimary && !c.ebillingEmail)) && <Badge tone="info" dot={false}>Billing</Badge>}</div> }]} />
+          <DataTable data={c.contacts} searchable={false} columns={[{ id: 'n', header: 'Name', cell: (x) => `${x.row.original.firstName} ${x.row.original.lastName}` }, { accessorKey: 'position', header: 'Position', cell: (x) => x.getValue<string>() ?? '—' }, { accessorKey: 'phone', header: 'Phone' }, { accessorKey: 'email', header: 'Email' }, { id: 'f', header: 'Flags', cell: (x) => <div className="flex gap-1">{x.row.original.isPrimary && <Badge tone="brand" dot={false}>Primary</Badge>}{x.row.original.isSignatory && <Badge tone="neutral" dot={false}>Signatory</Badge>}{(x.row.original.isBilling || (x.row.original.isPrimary && !c.ebillingEmail)) && <Badge tone="info" dot={false}>Billing</Badge>}</div> },
+            // V1.4 row 42: the signatory's ID and specimen signature.
+            { id: 'sig', header: 'Signatory ID / specimen', cell: (x) => { const s = x.row.original; const e = s.signatoryEvidence; if (!s.isSignatory) return <span className="text-muted">—</span>;
+              return e ? <span className="flex flex-col text-xs"><span className="text-ink-2">{e.idType} · <span className="font-mono">{e.idNumber}</span>{e.idExpiry ? ` · exp. ${formatDate(e.idExpiry)}` : ''}</span><span className="text-muted">{[e.idFile && `ID copy ${e.idFile}`, e.specimenFile && `Specimen ${e.specimenFile}`].filter(Boolean).join(' · ') || 'No files'}</span></span>
+                : <Badge tone="warning">ID / specimen missing</Badge>; } }]} />
         </Card>
       )}
       {tab === 'rates' && <DataTable data={d.contracts.filter((x) => x.status === 'Active').flatMap((ct) => ct.rates.map((r) => ({ ...r, contractNo: ct.contractNo, cls: ct.class })))} searchable={false} emptyTitle="No active contract rates" columns={[
@@ -374,8 +380,9 @@ export function ClientProfilePage() {
 /** Add an authorised contact / signatory (used by the profile and the contract form). */
 export function AddContactModal({ code, onClose, signatory, onAdded }: { code: string; onClose: () => void; signatory?: boolean; onAdded?: (id: string) => void }) {
   const [v, setV] = useState({ firstName: '', lastName: '', position: '', phone: '', email: '', isSignatory: !!signatory });
+  const [ev, setEv] = useState({ idType: '', idNumber: '', idExpiry: '', idFile: '', specimenFile: '' }); // V1.4 row 42
   const [tried, setTried] = useState(false);
-  const act = useAction(() => api.clients.addContact(code, v), { success: 'Contact added', onSuccess: (r) => { onAdded?.(r.id); onClose(); } });
+  const act = useAction(() => api.clients.addContact(code, { ...v, signatoryEvidence: v.isSignatory ? { idType: ev.idType, idNumber: ev.idNumber, idExpiry: ev.idExpiry || undefined, idFile: ev.idFile || undefined, specimenFile: ev.specimenFile || undefined } : undefined }), { success: 'Contact added', onSuccess: (r) => { onAdded?.(r.id); onClose(); } });
   const req = (k: 'firstName' | 'lastName' | 'phone' | 'email') => (tried && !v[k].trim() ? 'Required' : undefined);
   return (
     <Modal open onClose={onClose} title={signatory ? 'Add signatory' : 'Add contact'} footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={act.isPending} onClick={() => { setTried(true); if (v.firstName.trim() && v.lastName.trim() && v.phone.trim() && v.email.trim()) act.mutate(undefined); }}>Save</Button></>}>
@@ -387,6 +394,17 @@ export function AddContactModal({ code, onClose, signatory, onAdded }: { code: s
         <Input label="Email" type="email" required value={v.email} error={req('email')} onChange={(e) => setV({ ...v, email: e.target.value })} placeholder="e.g. name@company.ph" />
       </FormGrid>
       <Checkbox className="mt-4" label="Authorised signatory" description="Can sign lease contracts for the client" checked={v.isSignatory} onChange={(e) => setV({ ...v, isSignatory: e.target.checked })} />
+      {/* V1.4 row 42 (CLT-002/003): identification and specimen signature of the signatory — proposed field set, pending Delbros confirmation. */}
+      {v.isSignatory && <FormSection className="mt-4" title="Signatory identification & specimen" description="A valid government ID and a specimen signature, used to check signatures on contracts. Proposed field set — Delbros to confirm the exact documents.">
+        <FormGrid>
+          <Select label="ID type" required value={ev.idType} error={fieldError(act.error, 'idType')} onChange={(e) => setEv({ ...ev, idType: e.target.value })} placeholder="Select" options={["Driver's license", 'Passport', 'UMID', 'PhilSys national ID', 'PRC ID', 'SSS ID', 'Other government ID'].map((x) => ({ value: x, label: x }))} />
+          <Input label="ID number" required value={ev.idNumber} error={fieldError(act.error, 'idNumber')} onChange={(e) => setEv({ ...ev, idNumber: e.target.value })} placeholder="e.g. N01-23-456789" />
+          <Input label="ID expiry" type="date" value={ev.idExpiry} error={fieldError(act.error, 'idExpiry')} onChange={(e) => setEv({ ...ev, idExpiry: e.target.value })} hint="Leave blank if the ID has no expiry" />
+          <FilePick label="ID copy (front and back)" accept="image/*,application/pdf" fileName={ev.idFile} onPick={(n) => setEv({ ...ev, idFile: n })} hint="PDF or image" />
+          <FilePick label="Specimen signature" required accept="image/*,application/pdf" fileName={ev.specimenFile} error={fieldError(act.error, 'specimenFile')} onPick={(n) => setEv({ ...ev, specimenFile: n })} hint="Three specimen signatures on one sheet (scan or photo)" />
+        </FormGrid>
+        {act.error && !fieldError(act.error, 'idType') && <Banner className="mt-2" tone="danger">{errMessage(act.error)}</Banner>}
+      </FormSection>}
     </Modal>
   );
 }
@@ -462,7 +480,8 @@ function ClientEditDrawer({ client, onClose }: { client: Client; onClose: () => 
 }
 
 function SubmitAccreditationModal({ code, onClose }: { code?: string; onClose: () => void }) {
-  const { ref } = useRefLookups();
+  const { ref, setting } = useRefLookups();
+  const reqStage = String(setting('clt.request_details_stage') ?? 'optional'); // V1.4 row 39
   const [client, setClient] = useState(code ?? '');
   const [b, setB] = useState({ yearsInOperation: '', secReg: '', tin: '', tradeReferences: '', bankReferences: '', natureOfBusiness: '', owners: '', requestedLimit: 0, requestedTermDays: '', expectedUnits: '', remarks: '' });
   const [types, setTypes] = useState<string[]>([]);
@@ -497,7 +516,8 @@ function SubmitAccreditationModal({ code, onClose }: { code?: string; onClose: (
           <Textarea label="Bank references" value={b.bankReferences} onChange={(e) => setB({ ...b, bankReferences: e.target.value })} placeholder={'One per line: bank, branch, account type\ne.g. BDO Ortigas branch, current account'} />
           <Input label="Owners / officers" value={b.owners} onChange={(e) => setB({ ...b, owners: e.target.value })} placeholder="e.g. Juan Dela Cruz (President)" />
         </FormGrid>
-        <FormSection title="Request details (for Finance and the VP)" description="Optional; whether these are captured at submission is pending confirmation.">
+        {reqStage === 'investigation' ? <Banner tone="info" title="Request details">Requested credit limit, term, expected units and contract types are completed by C&amp;C / Finance during the investigation (proposed rule — pending Delbros confirmation).</Banner> :
+        <FormSection title={`Request details (for Finance and the VP)${reqStage === 'submission' ? ' — required' : ''}`} description={`${reqStage === 'submission' ? 'Required from the AE at submission.' : 'Optional at submission; C&C / Finance can complete them later.'} Who supplies them and when is pending Delbros confirmation (Admin → Settings → Client & Contract).`}>
           <FormGrid>
             <MoneyInput label="Requested credit limit" value={b.requestedLimit || ''} onChange={(e) => setB({ ...b, requestedLimit: Number(e.target.value) || 0 })} placeholder="e.g. 500000" />
             <Input label="Requested credit term (days)" type="number" value={b.requestedTermDays} onChange={(e) => setB({ ...b, requestedTermDays: e.target.value })} placeholder="e.g. 30" />
@@ -505,7 +525,7 @@ function SubmitAccreditationModal({ code, onClose }: { code?: string; onClose: (
             <Field label="Contract types requested">{() => <div className="flex h-9 flex-wrap items-center gap-4">{['LTL', 'SPL', 'QLP'].map((t) => <Checkbox key={t} label={t} checked={types.includes(t)} onChange={(e) => setTypes(e.target.checked ? [...types, t] : types.filter((x) => x !== t))} />)}</div>}</Field>
           </FormGrid>
           <Textarea className="mt-4" wrapperClassName="mt-4" label="Remarks" value={b.remarks} onChange={(e) => setB({ ...b, remarks: e.target.value })} placeholder="Anything C&C, Finance or the VP should know" />
-        </FormSection>
+        </FormSection>}
         <FormSection title="Attachments (optional)" description="PDF or image. Eligibility flags are not requested here — the VP sets them at sign-off.">
           <div className="grid gap-3 md:grid-cols-3">
             {docs.map((d, i) => <FilePick key={d.kind} label={d.kind} accept=".pdf,image/*" fileName={d.fileName} onPick={(n) => setDocs(docs.map((x, k) => (k === i ? { ...x, fileName: n } : x)))} />)}
@@ -646,6 +666,8 @@ function AccreditationDrawer({ row: a, all, onOpen, onClose }: { row: AccRow; al
           </FormSection>
         )}
         {wf && <Card><CardHeader title="Approval steps" description="Actor and timestamp per step" /><ApprovalTimeline workflow={wf} userName={userName} /></Card>}
+        {/* V1.4 row 43 (CLT-016): where the cash bond is recorded — one place (Cash Bonds, against the contract), linked from here instead of a duplicate field. */}
+        <Banner tone="info" title="Cash bond (CLT-016)">The cash bond is not recorded on the accreditation. It is recorded once, on <Link className="font-medium text-brand-700 hover:underline" to={`/cash-bonds?client=${a.clientCode}`}>Cash Bonds</Link>, against the client’s contract (proposed owner: Accounting / Treasury when the contract is signed, with the Official Receipt). Which stage and owner record the receipt is pending Delbros confirmation.</Banner>
         {!myTurn && wf?.status === 'Pending' && <p className="text-[13px] text-muted">Read-only — actions appear only for the step owner ({stepOwner?.roles.map(roleName).join(', ')}).</p>}
         <FormSection title="BICI Evaluation Form" description={isCnc ? 'C&C Officer: complete the form, save a draft, then submit the evaluation. * = required to submit. Credit score and grade are entered manually (scoring model pending decision).' : 'Read-only.'}
           actions={isCnc && <><Button size="sm" variant="secondary" loading={saveBici.isPending} onClick={() => saveBici.mutate(undefined)}>Save draft</Button><Button size="sm" loading={decide.isPending} onClick={submitEval}>Submit evaluation</Button></>}>

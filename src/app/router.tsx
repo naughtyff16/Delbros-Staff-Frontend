@@ -99,7 +99,7 @@ export const router = createBrowserRouter([
       page('inventory', 'inv.balance', inventory, 'InventorySummaryPage'),
       page('inventory/transactions', 'inv.txn', inventory, 'StockTransactionPage'),
       // M09 Procurement
-      page('procurement', 'prc.pr', procurement, 'ProcurementPage'),
+      page('procurement', 'prc.pr|prc.po|prc.rr', procurement, 'ProcurementPage'), // V1.4 row 12: tabs follow the user's PR / PO / RR permissions
       // M10 Billing
       page('billing/run', 'fin.billing', billing, 'BillingRunPage'),
       page('billing/invoices', 'fin.invoice', billing, 'InvoiceListPage'),

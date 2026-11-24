@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowRight, Check, ChevronRight, Download, Eye, EyeOff, History, Lock, Plus, RotateCcw, Search, ShieldAlert, ShieldCheck, Unlock } from 'lucide-react';
 import { api, ApiError, PH_MOBILE, SENSITIVE_AUDIT, type MasterKind } from '../../lib/api-client';
 import {
-  ACTIONS, CONTRACT_TYPES, DEFAULT_SETTINGS, changePasswordSchema, formatDate, formatDateTime, formatPhp, ROLE_TEMPLATES, validateSetting,
+  ACTIONS, CONTRACT_TYPES, DEFAULT_SETTINGS, changePasswordSchema, formatDate, formatDateTime, formatPhp, ROLE_TEMPLATES, validateSetting, PENDING_ROLES, RESCUE_ROLE_MAPPING, pendingRole,
   type Action, type AuditEvent, type ContractType, type Grants, type RoleCode, type SettingDef, type User,
 } from '../../lib/shared';
 import {
@@ -137,12 +137,29 @@ export function UsersPage() {
 
 function RoleTemplates() {
   const [role, setRole] = useState<RoleCode>('BRANCH_GENERALIST');
+  const pend = pendingRole(role);
   return (
-    <Card>
-      <CardHeader title="Role permission template" description="Templates grant default access; per-user overrides are set on the user." actions={
-        <Select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as RoleCode)} options={Object.entries(ROLE_TEMPLATES).map(([k, v]) => ({ value: k, label: v.label }))} />} />
-      <PermissionMatrix grants={ROLE_TEMPLATES[role].grants} readOnly />
-    </Card>
+    <Stack>
+      {/* Staff UI changes V1.4 rows 2–7: one register of the role labels that are not in the FRS role list. */}
+      <Card>
+        <CardHeader title="Roles pending Delbros confirmation" description="These role labels are not in the FRS role list. Their permission templates are proposed defaults; record the approved name, scope and permissions here once Delbros confirms." />
+        <Banner tone="warning" className="mb-3" title="Rescue Coordinator / Rescue Dispatcher">{RESCUE_ROLE_MAPPING}</Banner>
+        <DataTable data={PENDING_ROLES} exportName="roles-pending-confirmation" onRowClick={(r) => setRole(r.role)} columns={[
+          { accessorKey: 'label', header: 'Role / demo user', cell: (c) => <div><p className="font-medium">{c.getValue<string>()}</p><p className="font-mono text-xs text-muted">{c.row.original.demoUser} · {c.row.original.role}</p></div> },
+          { accessorKey: 'frsMapping', header: 'FRS mapping (proposed)', meta: { wrap: true }, cell: (c) => <span className="block min-w-64 max-w-md text-xs">{c.getValue<string>()}</span> },
+          { accessorKey: 'scope', header: 'Scope', meta: { wrap: true }, cell: (c) => <span className="block min-w-32 text-xs">{c.getValue<string>()}</span> },
+          { accessorKey: 'responsibilities', header: 'Responsibilities (proposed)', meta: { wrap: true }, cell: (c) => <span className="block min-w-56 max-w-sm text-xs">{c.getValue<string>()}</span> },
+          { accessorKey: 'status', header: 'Status', cell: (c) => <Badge tone="warning">{c.getValue<string>()}</Badge> },
+        ]} />
+        <p className="mt-2 text-xs text-muted">Click a row to open its permission template below.</p>
+      </Card>
+      <Card>
+        <CardHeader title="Role permission template" description="Templates grant default access; per-user overrides are set on the user." actions={
+          <Select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value as RoleCode)} options={Object.entries(ROLE_TEMPLATES).map(([k, v]) => ({ value: k, label: `${v.label}${pendingRole(k as RoleCode) ? ' — pending confirmation' : ''}` }))} />} />
+        {pend && <Banner tone="warning" className="mb-3" title={`${pend.label}: proposed permissions, pending Delbros confirmation`}>{pend.frsMapping}</Banner>}
+        <PermissionMatrix grants={ROLE_TEMPLATES[role].grants} readOnly />
+      </Card>
+    </Stack>
   );
 }
 

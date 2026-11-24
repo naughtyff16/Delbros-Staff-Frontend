@@ -11,7 +11,7 @@ import {
 } from '../../lib/ui';
 import { useAuth } from '../../app/auth';
 import { errMessage, fieldError, useAction, useData, useRefLookups } from '../../shared/hooks';
-import { CreditGateBanner, Crumb } from '../../shared/components';
+import { CreditGateBanner, Crumb, RecordNotices } from '../../shared/components';
 import { DocFooter, DocHeader, PrintPreview } from '../../shared/print';
 import { AddContactModal, ClientStatusChip, FilePick } from './pages';
 
@@ -508,7 +508,7 @@ export function CashBondPage() {
   const { branchOptions, branchName, userName } = useRefLookups();
   const all = data.data ?? [];
   const rows = all.filter((b) => (!f.status || (f.status === 'Held' ? b.stage === 'Held' || b.stage.startsWith('Held') : f.status === 'Refunded' ? b.status === 'Refunded' : b.status !== 'Refunded' && !b.stage.startsWith('Held'))) && (!f.client || b.clientCode === f.client) && (!f.branch || b.branchCode === f.branch));
-  const held = rows.filter((b) => b.status !== 'Refunded');
+  const held = rows.filter((b) => b.status !== 'Refunded' && b.status !== 'Applied'); // V1.4: a bond applied to a final bill is no longer held
   const totalHeld = held.reduce((a, b) => a + b.balance, 0);
   const clientOpts = [...new Map(all.map((b) => [b.clientCode, b.clientName])).entries()].map(([value, label]) => ({ value, label }));
   const whyDisabled = (b: BondRow) => {
@@ -638,9 +638,11 @@ function BondLedger({ bond, whyNoWithdraw, onWithdraw, onClose }: { bond: BondRo
         </Card>
         {bond.withdrawals.map((w) => { const wf = bond.workflows.find((x) => x?.id === w.workflowId); return (
           <Card key={w.id}>
-            <CardHeader title={`Withdrawal ${formatPhp(w.amount)} · ${w.status}`} description={`${formatDateTime(w.requestedAt)} · refundable at request ${formatPhp(w.refundable)}${w.earlyException ? ' · EARLY — exception' : ''}`} />
+            {/* V1.4 rows 44–46: the current stage by name (e.g. Pending Admin), the unpaid "approved — awaiting refund" state, and the refund with the balance left. */}
+            <CardHeader title={`Withdrawal ${formatPhp(w.amount)} · ${w.status === 'Pending' && wf?.status === 'Pending' ? `Pending ${wf.steps[wf.currentStep]?.label ?? ''}` : w.status}`} description={`${formatDateTime(w.requestedAt)} · ${w.reason} · refundable at request ${formatPhp(w.refundable)}${w.earlyException ? ' · EARLY — exception' : ''}`} />
             {wf && <ApprovalTimeline workflow={wf} userName={userName} />}
-            {w.refund && <p className="mt-3 text-[13px]">Refund: {w.refund.method} on {formatDate(w.refund.date)} · Accounting ref {w.refund.reference} · {userName(w.refund.by)}</p>}
+            {w.status === 'Approved — awaiting refund' && <Banner className="mt-3" tone="warning" title="Approved — awaiting refund (not paid yet)">All four approvals are complete. The bond stays on the books until Accounting records the refund method, date and reference below.</Banner>}
+            {w.refund && <p className="mt-3 text-[13px]">Refund: {w.refund.method} on {formatDate(w.refund.date)} · Accounting ref {w.refund.reference} · {formatPhp(w.amount)} · {userName(w.refund.by)} · bond balance after refund {formatPhp(bond.balance)}</p>}
           </Card>
         ); })}
         {awaiting && can('clients.cashbond', 'approve') && (
@@ -653,6 +655,8 @@ function BondLedger({ bond, whyNoWithdraw, onWithdraw, onClose }: { bond: BondRo
             <div className="mt-3 flex justify-end"><Button loading={refund.isPending} disabled={!r.reference.trim() || !r.date} onClick={() => refund.mutate(undefined)}>Record refund {formatPhp(awaiting.amount)}</Button></div>
           </FormSection>
         )}
+        {/* V1.4 row 31: withdrawal notices to Sales, C&C, Accounting and Finance (rule N07) with recipients and delivery state. */}
+        <RecordNotices refNo={bond.id} link={`/cash-bonds?bond=${bond.id}`} title="Withdrawal notifications" />
       </Stack>
     </Drawer>
   );

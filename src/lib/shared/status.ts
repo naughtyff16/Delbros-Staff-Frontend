@@ -1,4 +1,6 @@
 // Single source of truth for status → tone (docs/03-design-system.md §5).
+/** Staff UI changes V1.4 (row 13): statuses grouped as "Other" on the Allocation board and the Dashboard (one mapping for both screens). */
+export const FLEET_OTHER_STATUSES = ['New', 'Unaccounted', 'Legal', 'Converted', 'Sold', 'Killed'];
 export type Tone = 'success' | 'warning' | 'danger' | 'danger-solid' | 'info' | 'neutral' | 'purple' | 'brand';
 
 export type StatusDomain =

@@ -26,7 +26,8 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   { key: 'gat.late_encoding_auto_days', label: 'Late encoding auto-correct window (days)', group: 'Gate Operations', type: 'number', value: 7, rule: 'BR-05' },
   { key: 'gat.ewa_validity_hours', label: 'EWA validity (hours)', group: 'Gate Operations', type: 'number', value: 24, rule: 'BR-06' },
   { key: 'gat.cross_branch_code_ttl_hours', label: 'Cross-branch code validity (hours)', group: 'Gate Operations', type: 'number', value: 72, rule: 'BR-16' },
-  { key: 'prc.po_tier_threshold', label: 'PO approval threshold (CEO + CHRO above)', group: 'Procurement', type: 'money', value: 250000, rule: 'BR-09' },
+  // V1.4 row 9: the review read "₱250" in BR-09; the system uses ₱250,000 — kept, and flagged until Delbros confirms the BRD / FRS value.
+  { key: 'prc.po_tier_threshold', label: 'PO approval threshold (CEO + CHRO above)', group: 'Procurement', type: 'money', value: 250000, rule: 'BR-09 (value to confirm: ₱250,000 in use)', pending: true },
   { key: 'fin.pcv_max', label: 'Petty cash maximum (RFP above)', group: 'Finance', type: 'money', value: 4000, rule: 'BR-10' },
   { key: 'fin.pcv_fund_float', label: 'Petty cash fund float (per entity)', group: 'Finance', type: 'money', value: 20000, rule: 'BR-10 (Q-PRC-PCF)', pending: true },
   { key: 'reg.renewal_cost_default', label: 'Default registration renewal cost (budget forecast)', group: 'Regulatory', type: 'money', value: 1800, rule: 'DBL-REG-005 (Q-REG-COST)', pending: true },
@@ -46,6 +47,10 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   { key: 'res.rate_per_km', label: 'Rescue standard rate per km', group: 'Rescue', type: 'money', value: 50, rule: 'BR-11 (value TBD)', pending: true },
   { key: 'res.sla_amber_hours', label: 'Rescue SLA amber after (hours, request → completion)', group: 'Rescue', type: 'number', value: 2, rule: 'DBL-RES-007 (proposed)', pending: true },
   { key: 'res.sla_red_hours', label: 'Rescue SLA red after (hours, request → completion)', group: 'Rescue', type: 'number', value: 4, rule: 'DBL-RES-007 (proposed)', pending: true },
+  // Staff UI changes V1.4 (rows 32–33): repair closure rules — proposed, pending Delbros / R&M decision.
+  { key: 'rm.closure_rule', label: 'Repair closure — close each repair system, or the whole job order at once', group: 'Repair', type: 'text', value: 'per_system', rule: 'DBL-ALO-004 (proposed — Delbros to confirm)', pending: true },
+  { key: 'rm.after_photo_required', label: 'After-repair photo required at Close by R&M', group: 'Repair', type: 'boolean', value: true, rule: 'DBL-RM-002 / RES-006 evidence (proposed)', pending: true },
+  { key: 'res.totals_zero_months', label: 'Rescue totals by month — list months with no completed rescue (₱0 rows)', group: 'Rescue', type: 'boolean', value: true, rule: 'DBL-RES-007 (proposed — Delbros to confirm)', pending: true },
   { key: 'rm.hours_per_laborer_week', label: 'Laborer hours per week (headcount planning)', group: 'Repair', type: 'number', value: 48, rule: 'DBL-RM-006 (proposed)', pending: true },
   { key: 'rm.shift_hours', label: 'Shift windows (morning / afternoon / evening)', group: 'Repair', type: 'text', value: 'Morning 06:00–14:00 · Afternoon 14:00–22:00 · Evening 22:00–06:00', rule: 'DBL-RM-007 (Q-RM-02)', pending: true },
   { key: 'ast.pm_due_soon_days', label: 'Non-chassis PM “due soon” flag (days before Next PM)', group: 'Assets & Inventory', type: 'number', value: 7, rule: 'BO-APS-04 (proposed default)', pending: true },
@@ -56,6 +61,9 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   { key: 'clt.renewal_amber_days', label: 'Contract “expiring soon” flag (days before expiry)', group: 'Client & Contract', type: 'number', value: 90, rule: 'DBL-CLT-011 (3/2/1-month notices)' },
   // Staff review 1.2: contract defaults used by Create lease contract (each contract can still change them). Term limits per type (LTL ≥ 1 year,
   // QLP 10 days–6 months) are fixed business rules (BR-12) checked on the contract, not settings.
+  // Staff UI changes V1.4 (rows 38–39): when the sales information and the accreditation request details must be captured — proposed, current behaviour kept.
+  { key: 'clt.sales_info_stage', label: 'Sales information (industry, lead source, expected units, contract types) — required at', group: 'Client & Contract', type: 'text', value: 'optional', rule: 'V1.4 row 38 (Sales / C&C decision pending)', pending: true },
+  { key: 'clt.request_details_stage', label: 'Accreditation request details (credit limit, term, units, contract types) — supplied by', group: 'Client & Contract', type: 'text', value: 'optional', rule: 'V1.4 row 39 (Delbros decision pending)', pending: true },
   { key: 'clt.default_credit_term_days', label: 'Default credit term on new contracts (days)', group: 'Client & Contract', type: 'number', value: 30, rule: 'SCR-08 contract defaults (proposed)', pending: true },
   { key: 'clt.default_lock_in_months', label: 'Default lock-in for Long-Term contracts (months, pre-termination basis)', group: 'Client & Contract', type: 'number', value: 12, rule: 'BR-12 / BR-15 (to confirm)', pending: true },
   { key: 'clt.penalty_non_return', label: 'Contract penalty default — non-return of unit', group: 'Client & Contract', type: 'money', value: 5000, rule: 'SCR-08 contract defaults (proposed)', pending: true },
@@ -98,6 +106,13 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   { key: 'alo.idle_days_threshold', label: 'Idle unit flag after (days)', group: 'Allocation', type: 'number', value: 30, rule: 'DCIR (TBD)', pending: true },
   { key: 'alo.reg_warn_days', label: 'Registration “Expiring” window (days) — Chassis master, Allocation board and Allocate warning; expired = blocked', group: 'Allocation', type: 'number', value: 14, rule: 'DBL-ALO-003 (proposed default — confirm rule)', pending: true },
   { key: 'alo.parkfix_daily_rate', label: 'Park & Fix daily rate (override needs Park & Fix approve permission)', group: 'Allocation', type: 'money', value: 350, rule: 'DBL-ALO-005 (Q-ALO-02)', pending: true },
+  // Staff UI changes V1.4 (row 51): how the contracted-unit limit applies to new unit requests — proposed "warn"; Sales / Operations to approve.
+  { key: 'alo.contract_unit_limit', label: 'Contracted-unit limit on new unit requests (on hire + allocated + requested)', group: 'Allocation', type: 'text', value: 'warn', rule: 'DBL-ALO-001 (proposed — Sales / Operations to approve)', pending: true },
+  // Staff UI changes V1.4 (rows 22, 24, 26): Park & Fix billing rules — proposed defaults, Finance / Delbros to approve.
+  { key: 'alo.parkfix_handling_in', label: 'Park & Fix handling-in charge (per trailer)', group: 'Allocation', type: 'money', value: 500, rule: 'DBL-ALO-005 legacy receipt (proposed amount — Finance to approve)', pending: true },
+  { key: 'alo.parkfix_handling_timing', label: 'Park & Fix handling-in charge billed at', group: 'Allocation', type: 'text', value: 'park_out', rule: 'DBL-ALO-005 (proposed — Finance to approve)', pending: true },
+  { key: 'alo.parkfix_vat_basis', label: 'Park & Fix VAT basis (rate, handling and repair amounts)', group: 'Allocation', type: 'text', value: 'inclusive', rule: 'DBL-ALO-005 (VAT basis pending Finance)', pending: true },
+  { key: 'alo.parkfix_long_stay', label: 'Park & Fix long-stay billing', group: 'Allocation', type: 'text', value: 'park_out_only', rule: 'DBL-ALO-005 (proposed — Finance to approve)', pending: true },
   { key: 'alo.dcir_snapshot_days', label: 'DCIR nightly snapshot retention (days)', group: 'Allocation', type: 'number', value: 90, rule: 'DBL-ALO-003 (proposed default — confirm retention)', pending: true },
 ];
 
@@ -122,7 +137,7 @@ export const SETTING_META: Record<string, Partial<SettingDef>> = {
   'gat.gatepass_seq_digits': { unit: 'digits', integer: true, min: 4, max: 8, decision: 'Q-GAT-07', help: 'Gate passes in use have 6 digits after the branch prefix (e.g. GP-MNL-000880). The FRS examples (GEN0001 / CEB0001) use 4 — Delbros to confirm the final format. The per-branch prefix is maintained in Master data → Branches.' },
   'reg.notice_days': { help: 'Comma-separated days before expiry: 3 months, 1 month, 2 weeks. Drives notification rules N25/N26.' },
   'reg.renewal_cycle_months': { unit: 'months', integer: true, min: 1, max: 60, decision: 'Q-REG-02', help: 'LTO renewal cadence; confirm whether it follows plate ending or registration date.' },
-  'prc.po_tier_threshold': { min: 1, sensitive: true },
+  'prc.po_tier_threshold': { min: 1, sensitive: true, decision: 'V1.4 row 9 — BR-09 amount', help: 'Up to this amount the APS / MMG Manager gives the final approval; above it both the CEO and the CHRO must approve (two separate signatures). The V1.4 review quoted ₱250; ₱250,000 is in use until Delbros confirms the BRD / FRS value.' },
   'prc.pr_routing': { sensitive: true, options: [{ value: 'DEPT_HEAD>APS_MANAGER>APS_OFFICER', label: 'Dept Head → Admin → APS → final approval (APS/MMG Manager, or CEO + CHRO above the PO threshold)' }, { value: 'DEPT_HEAD>APS_OFFICER', label: 'Dept Head → APS → final approval (APS/MMG Manager, or CEO + CHRO above the PO threshold)' }], help: 'Gates every PR/PO passes before the amount-based final approval: up to the PO threshold the APS/MMG Manager approves, above it CEO + CHRO (BR-09). Same steps as on the New purchase request dialog.' },
   'fin.rfp_funding_route': { decision: 'Q-FIN-03', options: [{ value: 'treasury', label: 'Treasury releases (check / transfer)' }, { value: 'branch_fund', label: 'Branch revolving fund, Treasury replenishes' }] },
   'prc.branch_parts_multiplier': { unit: '×', min: 0.5, max: 3, help: 'Applied to the standard part price per branch. Per-branch overrides are set in Master data → Branches.' },
@@ -136,7 +151,20 @@ export const SETTING_META: Record<string, Partial<SettingDef>> = {
   'auth.max_failed_logins': { unit: 'attempts', integer: true, min: 3, max: 10, pending: true, decision: 'Q-SEC-01', sensitive: true },
   'auth.lockout_minutes': { unit: 'minutes', integer: true, min: 5, max: 1440, pending: true, decision: 'Q-SEC-01', sensitive: true },
   'auth.password_min_length': { unit: 'characters', integer: true, min: 8, max: 64, pending: true, decision: 'Q-SEC-01', sensitive: true },
+  'rm.closure_rule': { decision: 'V1.4 row 32', options: [{ value: 'per_system', label: 'Per repair system — every system on the JO is closed before Close by R&M (proposed)' }, { value: 'per_jo', label: 'Per job order — one Close by R&M closes every system' }],
+    help: 'ALO-004: a chassis returns from Breakdown / In Repair to Available only when every required repair is closed and the quality sign-off (TQS) is done.' },
+  'clt.sales_info_stage': { decision: 'V1.4 row 38', options: [{ value: 'optional', label: 'Optional everywhere (current)' }, { value: 'registration', label: 'Required at registration' }, { value: 'accreditation', label: 'Optional at registration, required before submitting for accreditation' }],
+    help: 'Values entered at registration are kept on the client and carried into accreditation either way.' },
+  'clt.request_details_stage': { decision: 'V1.4 row 39', options: [{ value: 'optional', label: 'Optional at submission (current)' }, { value: 'submission', label: 'Required from the AE at submission' }, { value: 'investigation', label: 'Completed by C&C / Finance during the investigation (hidden at submission)' }] },
   'alo.idle_days_threshold': { ...D, min: 1, max: 365 },
+  'alo.parkfix_handling_in': { decision: 'V1.4 row 22', help: 'Charged once per trailer for handling it into the depot (legacy receipt "handling details"). Amount is a proposed default.' },
+  'alo.parkfix_handling_timing': { decision: 'V1.4 row 22', options: [{ value: 'park_out', label: 'On the park-out Debit Memo, with the parking fee (proposed)' }, { value: 'park_in', label: 'At park-in, on its own Debit Memo' }] },
+  'alo.parkfix_vat_basis': { decision: 'V1.4 row 25', sensitive: true, options: [{ value: 'inclusive', label: 'VAT-inclusive — amounts include 12% VAT (proposed; matches DM-000039 = 8 × ₱350)' }, { value: 'exclusive', label: 'VAT-exclusive — 12% VAT added on top' }],
+    help: 'Applies to the daily rate, the handling-in charge and the repair amount. The breakdown on the receipt and the Debit Memo uses the same basis.' },
+  'alo.parkfix_long_stay': { decision: 'V1.4 row 26', options: [{ value: 'park_out_only', label: 'Bill once at park-out (current)' }, { value: 'monthly_interim', label: 'Interim Debit Memo every 30 days, balance at park-out' }],
+    help: 'With interim billing, the park-out bill deducts the amounts already billed so nothing is charged twice. Repair charges join the bill when the job order is closed.' },
+  'alo.contract_unit_limit': { decision: 'V1.4 row 51', options: [{ value: 'warn', label: 'Warn only — the request can still be logged (current)' }, { value: 'block', label: 'Block — amend the contract first' }],
+    help: 'Counts units on hire, allocated and still requested on the contract plus the new request. Delbros to approve a hard limit or a controlled override.' },
 };
 
 /** Full definition for the edit dialog: base def + SETTING_META + defaults inferred from type/label. */

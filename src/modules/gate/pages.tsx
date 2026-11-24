@@ -617,7 +617,9 @@ function GatePassBlock({ g, title }: { g: GatePass; title: string }) {
           { label: 'Driver', value: g.driverName }, { label: 'Driver licence no.', value: g.driverLicenseNo },
           ...(g.direction === 'IN' ? [{ label: 'Flat tires / vandalized', value: `${g.flatTires ?? 0} / ${g.vandalized ? 'Y' : 'N'}` }, { label: 'Origin branch', value: g.originBranchCode ?? g.branchCode }] : []),
           ...(g.credentialMismatch?.length ? [{ label: 'Differed from EWA', value: g.credentialMismatch.join(', ') }] : [])]} />
-        {g.inspection.length > 0 && <InspectionChecklist lines={g.inspection} readOnly showCharges={g.direction === 'IN'} />}
+        {/* V1.4 rows 16–17: the saved per-part inspection (GAT-004 Gate Out / GAT-005 Gate In) is shown with the stored EIR; an empty list is stated, not hidden. */}
+        {g.inspection.length > 0 ? <InspectionChecklist lines={g.inspection} readOnly showCharges={g.direction === 'IN'} />
+          : <Banner tone="warning" title={`No per-part ${g.direction === 'IN' ? 'parts status (GAT-005)' : 'condition checklist (GAT-004)'} stored on this gate pass`}>Only the general assessment was saved. Records encoded on the current {g.direction === 'IN' ? 'Gate In' : 'Gate Out'} screen always store the itemized inspection.</Banner>}
         <KeyValueGrid cols={2} items={[{ label: 'Remarks / damage notes', value: g.remarks ?? '—' }, { label: 'Photos', value: g.photos?.join(', ') ?? '—' }]} />
         <div><p className="text-xs font-medium uppercase tracking-wide text-muted">Driver signature</p>{g.signature ? <img src={g.signature} alt="Driver signature" className="mt-1 h-14 rounded border border-line bg-white" /> : <p className="text-sm text-muted">Not captured (record predates signature capture)</p>}</div>
       </Stack>

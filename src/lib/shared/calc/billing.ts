@@ -62,6 +62,25 @@ export function invoiceTotals(lineAmounts: number[], vatPct = 0.12) {
   return { subtotal, vat, total: round2(subtotal + vat) };
 }
 
+/**
+ * Staff UI changes V1.4 (rows 22–25, 54): Park & Fix charge breakdown — Handling, Repair, Park charge, VAT and Total — used by the
+ * park-in form, the park-out bill, the receipt and the Debit Memo so all four always agree. VAT basis is a proposed setting:
+ * "inclusive" (configured amounts already include VAT; VAT is shown as its share) or "exclusive" (VAT added on top).
+ * Fix only = repair with no parking fee. interimBilled = amounts already billed on interim (long-stay) memos, so park-out never bills them twice.
+ */
+export type ParkFixVatBasis = 'inclusive' | 'exclusive';
+export function parkFixCharges(o: { days: number; dailyRate: number; service?: string; handling: number; repair: number; vatBasis: ParkFixVatBasis; vatPct: number; interimBilled?: number }) {
+  const park = o.service === 'Fix only' ? 0 : round2(o.days * o.dailyRate);
+  const handling = round2(o.handling), repair = round2(o.repair);
+  const gross = round2(park + handling + repair);
+  const net = o.vatBasis === 'inclusive' ? round2(gross / (1 + o.vatPct)) : gross;
+  const vat = o.vatBasis === 'inclusive' ? round2(gross - net) : round2(gross * o.vatPct);
+  const total = o.vatBasis === 'inclusive' ? gross : round2(gross + vat);
+  const interimBilled = round2(o.interimBilled ?? 0);
+  return { handling, repair, park, net, vat, total, interimBilled, due: round2(Math.max(0, total - interimBilled)), vatBasis: o.vatBasis };
+}
+export type ParkFixCharges = ReturnType<typeof parkFixCharges>;
+
 // BR-14 cash bond refund.
 export function cashBondRefundable(bond: number, unpaidInvoices: number, negativeWallet: number, openDebitMemos: number) {
   const deductions = round2(unpaidInvoices + Math.max(0, negativeWallet) + openDebitMemos);

@@ -87,18 +87,24 @@ function FilterBar({ f, setF, show }: { f: Filters; setF: (f: Filters) => void; 
 /** DBL-REG-006 counts: chassis & trailers by region; vehicles, motorcycles and prime movers nationwide; plus nationwide rollup. */
 function RegionSummary({ rows }: { rows: Row[] }) {
   const cnt = (rs: Row[]) => ({ registered: rs.filter((r) => r.window === 'ok').length, near: rs.filter((r) => ['14', '30', '90'].includes(r.window)).length, expired: rs.filter((r) => r.window === 'expired').length, pending: rs.filter((r) => r.window === 'pending').length, total: rs.length });
-  const regional = rows.filter((r) => r.category === 'Regional');
-  const regions = [...new Set(regional.map((r) => r.region))].sort();
-  const nat = rows.filter((r) => r.category === 'Nationwide');
-  const lines: { label: string; sub?: boolean; c: ReturnType<typeof cnt>; strong?: boolean }[] = [
-    ...regions.map((g) => ({ label: `${g} — chassis & trailers`, c: cnt(regional.filter((r) => r.region === g)) })),
-    ...(['Vehicle', 'Motorcycle', 'Prime Mover'] as const).map((t) => ({ label: `${t}s — nationwide`, c: cnt(nat.filter((r) => r.subjectType === t)) })),
-    { label: 'Nationwide rollup (all units)', c: cnt(rows), strong: true },
+  // Staff UI changes V1.4 (row 55, REG-006): regional counts for EVERY unit category — chassis & trailers, vehicles, motorcycles and
+  // prime movers — each with a nationwide subtotal; the subtotals reconcile to the nationwide rollup.
+  const groups: { label: string; match: (r: Row) => boolean }[] = [
+    { label: 'Chassis & trailers', match: (r) => ['Chassis', 'Trailer'].includes(r.subjectType) }, { label: 'Vehicles', match: (r) => r.subjectType === 'Vehicle' },
+    { label: 'Motorcycles', match: (r) => r.subjectType === 'Motorcycle' }, { label: 'Prime movers', match: (r) => r.subjectType === 'Prime Mover' },
   ];
+  const regionOf = (r: Row) => r.region || 'Head Office';
+  const lines: { label: string; sub?: boolean; c: ReturnType<typeof cnt>; strong?: boolean; subtotal?: boolean }[] = groups.flatMap((g) => {
+    const rs = rows.filter(g.match); if (!rs.length) return [];
+    const regions = [...new Set(rs.map(regionOf))].sort();
+    return [...regions.map((reg) => ({ label: `${reg} — ${g.label.toLowerCase()}`, sub: true, c: cnt(rs.filter((r) => regionOf(r) === reg)) })), { label: `${g.label} — nationwide`, subtotal: true, c: cnt(rs) }];
+  });
+  const sumTotals = groups.reduce((a, g) => a + rows.filter(g.match).length, 0);
+  lines.push({ label: `Nationwide rollup (all units)${sumTotals === rows.length ? '' : ' — check: category subtotals differ'}`, c: cnt(rows), strong: true });
   return (
-    <Card padded={false} className="mb-5"><div className="border-b border-line px-5 py-3"><CardHeader className="mb-0" title="Compliance counts by region" description="Registered (current), near expiry (≤ 3 months), expired and pending registration." /></div>
+    <Card padded={false} className="mb-5"><div className="border-b border-line px-5 py-3"><CardHeader className="mb-0" title="Compliance counts by region" description="Registered (current), near expiry (≤ 3 months), expired and pending registration — every unit category by region, with a nationwide subtotal per category and the nationwide rollup (REG-006)." /></div>
       <div className="overflow-x-auto"><table className="w-full text-[13px]"><thead className="bg-surface-alt text-[11px] uppercase text-muted"><tr><th className="px-4 py-2 text-left">Region / category</th><th className="px-3 py-2 text-right">Registered</th><th className="px-3 py-2 text-right">Near expiry</th><th className="px-3 py-2 text-right">Expired</th><th className="px-3 py-2 text-right">Pending</th><th className="px-3 py-2 text-right">Total</th></tr></thead>
-        <tbody>{lines.map((l) => <tr key={l.label} className={cn('border-t border-line', l.strong && 'bg-surface-alt/60 font-semibold')}><td className="px-4 py-1.5">{l.label}</td><td className="px-3 py-1.5 text-right tabular text-success">{l.c.registered}</td><td className="px-3 py-1.5 text-right tabular text-warning">{l.c.near}</td><td className={cn('px-3 py-1.5 text-right tabular', l.c.expired && 'font-semibold text-danger')}>{l.c.expired}</td><td className="px-3 py-1.5 text-right tabular">{l.c.pending}</td><td className="px-3 py-1.5 text-right tabular">{l.c.total}</td></tr>)}</tbody></table></div>
+        <tbody>{lines.map((l) => <tr key={l.label} className={cn('border-t border-line', l.strong && 'bg-surface-alt/60 font-semibold', l.subtotal && 'bg-surface-alt/30 font-medium')}><td className={cn('py-1.5', l.sub ? 'pl-8 pr-4 text-ink-2' : 'px-4')}>{l.label}</td><td className="px-3 py-1.5 text-right tabular text-success">{l.c.registered}</td><td className="px-3 py-1.5 text-right tabular text-warning">{l.c.near}</td><td className={cn('px-3 py-1.5 text-right tabular', l.c.expired && 'font-semibold text-danger')}>{l.c.expired}</td><td className="px-3 py-1.5 text-right tabular">{l.c.pending}</td><td className="px-3 py-1.5 text-right tabular">{l.c.total}</td></tr>)}</tbody></table></div>
     </Card>
   );
 }
